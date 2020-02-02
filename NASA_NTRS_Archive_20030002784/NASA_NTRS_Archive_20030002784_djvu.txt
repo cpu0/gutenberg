@@ -1,0 +1,1313 @@
+MV*)* 
+
+
+Reducing False Positives in Runtime Analysis of Deadlocks 
+
+
+Saddek Bensalem 1 and Klaus Havelund 2 
+
+1 VERIMAG, Centre quation - 2, avenue de Vignate, 38610 Gieres, France 
+Saddek. BensalemQimag. fr, 
+http : / /rav-verimag . imag . f r 
+
+Kestrel Technology, NASA Ames Research Center, Moffett Field, California USA 
+havelundOemail . arc . nasa. gov, 
+http : / /a se . arc . nasa . gov/havelund 
+
+
+Abstract. This paper presents an improvement of a standard algorithm for detecting dead- 
+lock potentials in multi- threaded programs, in that it reduces the number of false positives. 
+The standard algorithm works as follows. The multi- threaded program under observation is ex- 
+ecuted, while lock and unlock events are observed. A graph of locks is built, with edges between 
+locks symbolizing locking orders. Any cycle in the graph signifies a potential for a deadlock. 
+The typical standard example is the group of dining philosophers sharing forks. The algorithm 
+is interesting because it can catch deadlock potentials even though no deadlocks occur in the 
+examined trace, and at the same time it scales very well in contrast to more formal approaches 
+to deadlock detection. The algorithm, however, can yield false positives (as well as false neg- 
+atives). The extension of the algorithm described in this paper reduces the amount of false 
+positives for three particular cases: when a gate lock protects a cycle, when a single thread 
+introduces a cycle, and when the code segments in different threads that cause the cycle can 
+actually not execute in parallel. The paper formalizes a theory for dynamic deadlock detection 
+and compares it to model checking and static analysis techniques. It furthermore describes an 
+implementation for analyzing Java programs and its application to two case studies: a planetary 
+rover and a space craft altitude control system. 
+
+
+1 Introduction 
+
+Concurrent programming can in some situations give a programmer a flexibility in organizing interact- 
+ing code modules in a conceptually much simpler way than is possible with sequential programming. 
+
+It can potentially also speed up a program in case a multi-processor architecture is used. The Java 
+programming language [l] explicitly supports concurrent programming through a selection of concur- 
+rency language concepts, such as threads and monitors. Threads execute in parallel, and communicate 
+via shared objects that can be locked using synchronized access (a keyword in Java) to achieve mu- 
+tual exclusion. However, with concurrent programming comes a new set of problems that can hamper 
+the quality of the software. Deadlocks form such a problem category. In [17] a deadlock is defined as 
+follows: ” Two or more threads block each other in a vicious cycle while trying to access synchroniza- 
+tion locks needed to continue their activities” . That deadlocks pose a common problem is emphasized 
+by the following statement in [17]: ” Among the most central and subtle liveness failures is deadlock . 
+Without care, just about any design using synchronization on multiple cooperating objects can contain 
+the possibility of deadlock!* . Most of NASA’s software, that controls planetary rovers and space crafts 
+is concurrent, and hence therefore poses a risk to mission success. 
+
+The difficulty in detecting deadlocks comes from the fact that concurrent programs typically are non- 
+deterministic: several executions of the same program on the same input may yield different behaviors 
+
+- due-to slight-differencesin-the-way-threads-are-scheduled-^This-means-in-par-ticular-that-generating-the 
+
+particular executions that expose a deadlock is difficult. Various technologies have been developed 
+
+
+
+2 
+
+
+by the formal methods community to circumvent this problem, such as static analysis and, most 
+recently, model checking. Static analysis, such as performed by tools like JLint [2], PolySpace [19], 
+and ESC [8], analyze the source code without executing it. These techniques can be very efficient, 
+but yield many false positives, and additionally cannot well analyze programs where the object 
+structure is very dynamic. Model checking has recently been applied to software (in contrast to only 
+designs), for example in the Java PathFinder system (JPF) developed by NASA [12,23], and in 
+similar systems [10, 7, 15, 22]. A model checker explores all possible execution paths of the program, 
+and will therefore theoretically eventually expose a potential deadlock. This process is, however, quite 
+resource demanding, in memory consumption as well in execution time, especially for large realistic 
+programs consisting of thousands of lines of code. Using model checking for deadlock analysis has 
+been discussed by J. Corbett [5] 
+
+Typically static analysis and model checking both try' to be complete in the sense of avoiding false 
+negatives: all possibilities are examined. Furthermore, model checking tries to be general in exploring 
+all kinds of errors. In the development of tools there is sometimes a conflict between generality (an 
+important theoretical criterion) and efficiency. In order to make the techniques accepted in practice 
+an important strategy can be to identify simple sub-classes of properties, whose analysis is tractable. 
+Deadlocks is such a sub-class. We shall in particular investigate a technique based on trace analysis: a 
+program is instrumented to log synchronization events when executed. The algorithm then examines 
+the log file, building a lock graph, which reveals deadlock potentials by containing cycles. This tech- 
+nique has previously been implemented in the the commercial tool Visual Threads [11] and scales very 
+well since an arbitrary execution trace can reveal deadlocks even though such do not occur during the 
+execution. The approach is essentially to turn a property (deadlock freedom) into a highly testable 
+property (cycle freedom), that has higher probability of being detected if violated. The algorithm, 
+however, can give false positives (as well as false negatives), putting a burden on the user to refute 
+such. Our goal is to reduce the amount of false positives reported by the algorithm, and for that 
+purpose we have modified it as reported in this paper. The modified algorithm has been implemented 
+in Java to analyze Java programs, but the principles and theory presented are universal and apply 
+in full to concurrent programs written in languages like C and C-f 4* as well, using for example the 
+POSIX threading library [18]. 
+
+The paper is organized as follows. Section 2 introduces preliminary notation used throughout the 
+rest of the paper. Section 3 defines the notion of deadlock, outlines how deadlocks can be introduced 
+in Java programs, and then discusses different ways of analyzing programs for deadlocks such as 
+static analysis and model checking. Trace analysis is then suggested as a solution with a purpose, and 
+the notion of testable property is defined . Section 4 presents the algorithm in three stages, starting 
+with the classical algorithm as it is imagined implemented in [11], and then continuing with two 
+modifications, each reducing false positives. Section 5 shortly describes the implementation of the 
+algorithm in the Java PathExplorer tool and presents the results of a couple of case studies. Finally, 
+Section 6 contains conclusions. 
+
+2 Notations and Preliminaries 
+
+A labelled transition system is given by (Q,E y R) y where Q is the set of states, E the set of labels 
+and R C. Q x E x Q is the transition relation. A directed graph is a pair G = (S y R) of sets satisfying 
+R C S x S. The set R is called the edge set of G, and its elements are called edges. A path p is a non- 
+empty graph G — ( S,R ) of the form S = {x 1 ,x 2 , ■ ■ . ,x k } and R = {(zi, x 2 ), (x 2l x 3 ), . . . , (x k -i,x k )}, 
+where the X{ are all distinct. The nodes x Q and are linked by p and are called its ends; we often 
+refer to a path by the natural sequence of its nodes, writing, say, p = xi,x 2, . . . , z* and calling p a 
+path from xi to zjfc. A cycle is a path where the ends x± and Xk are the same. In case where the edges 
+— are-labefled-*wlth-elements4n-X,-(S4s4riplet-(5 f X,~iE)-and-called-a-labelled-graph-with-Jt-G_5-xT'Oc5, - - 
+A labelled path, respectively cycle, is a labelled graph with the obvious meaning. Given a sequence 
+
+
+3 
+
+
+a = 2:1,0:25 . . . ,x n , we refer to an element at the position i in a by <j[i ] and the length of <7 by |cr[. 
+We denote by a 1 the prefix . . . , x x . Given a mapping M : [A -+ R], we let M\[a t-* b] denote the 
+mapping M extended with a mapping to b. Value lookup is denoted by M{a]> We denote the empty 
+mapping by []. 
+
+3 Deadlock Detection 
+
+Deadlock is one of the most serious problems in multitasking concurrent programming systems. As 
+early as in the 60 ’s the deadlock problem was recognized and analyzed, Dijkstra [ 9 ] described it as 
+the problem of the deadly embrace. In multitasking concurrent systems, a process can request and 
+release resources local or remote (for example, data objects in database systems) in any order, which 
+may not be known ahead of time and a process can request resources while holding others. If the 
+sequence of the allocation of resources to processes is not controlled in such environments, deadlock 
+can occur. Deadlock is a constant threat where the systems have high degree of resource and data 
+sharing. 
+
+Two types of deadlocks have been discussed in the literature [21] [ 16 ]: resource deadlocks and com- 
+munication deadlocks . In resource deadlocks, a process which requests resources must wait until it 
+acquires all the requested resources before it can proceed with its computation. A set of processes 
+is resource deadlocked if each process in the set requests a resource held by another process in the 
+set. In communication deadlock, messages are the resources for which processes wait. Reception of a 
+message takes a process out of wait. A set of processes is communication deadlocked if each process 
+in the set is waiting for a message from another process in the set and no process in the set ever 
+sends a message. In this paper we focus only on resource deadlocks. The deadlock-handling approach 
+that we propose is based on a conservative algorithm that is an extension of a standard algorithm for 
+detecting deadlock potentials in multi-threaded programs. Formally the concept of deadlock can be 
+defined as follows. 
+
+Definition 1 (Deadlock) : A deadlock can occur between n threads £1, . . . , t n if they access n shared 
+locks L = {/x , . . . , l n } and there is a state of the execution , and an enumeration E of L, such that ti 
+holds E(i ) in that state and ti next wants to take E(j) for some j ^ i- 
+
+3.1 Deadlocks in Multithreaded Java Programs 
+
+Java [1] is a general purpose object oriented programming language with built in features for multi- 
+threaded programming. Threads can communicate via shared objects by for example calling methods 
+on those objects. In order to avoid data races in these situations (where several threads access a shared 
+object simultaneously), objects can be locked using the synchronized statement, or by declaring 
+methods on the shared objects synchronized, which is equivalent. For example, a- thread t can 
+obtain a lock on an object A and then execute a statement S while having that lock as follows: 
+synchronized (A) {S}. During the execution of S, no other thread can obtain a lock on A. However t 
+can take the same lock recursively, corresponding to calling several methods on a shared object. The 
+lock is released when the scope of the synchronized statement is left; that is, when execution passes 
+the bracket. Java also provides the wait and notify primitives in support for user controlled 
+interleaving between threads. While the synchronized primitive is the main source for resource 
+deadlocks in Java, the wait and notify primitives are the main source for communication deadlocks. 
+Since this paper focuses on resource deadlocks, we shall in the following focus on Java’s capability of 
+creating and executing threads and on the synchronized statement. 
+
+-Consider -the classical dining philosopher- example,- ill.ustrated-in. Figure L A fork -is an -object of class 
+. Fork. The Philosopher class extends the Thread class and provides a run method, which represents 
+
+
+
+4 
+
+
+the thread behavior when started with the start method. The constructor of the Philosopher class 
+stores the forks it uses. The philosophers are created in a ring with the last philosopher using fork 
+number 0 due to the application of the modulo operator A counter is used to limit the amount 
+of meals consumed. A deadlocked state occurs when all philosophers have taken their left fork, but 
+not yet their right. In this state they cannot take their left fork since it has been taken by the left 
+neighbor. This is the kind of cyclic resource deadlock situation that we will explore. In the next 
+sections we shall explore different techniques for detecting such deadlocks. 
+
+
+class ForkO 
+
+class Philosopher extends Thraad-C 
+Fork left; Fork right; 
+int count - 0; 
+
+public Philosopher (Fork left, Fork right}{ 
+this. left - left; 
+this. right « right; 
+start () ; 
+
+> 
+
+public void run () { 
+
+while (count < IQ) {eat () ;} 
+
+> 
+
+
+privata void eat(){ 
+synchronized (left) f 
+synchronized (right ){ 
+count ++; 
+
+> 
+
+> 
+
+
+> 
+
+
+class Main{ 
+
+static final int Nf ■ 10; 
+public static void main (String [] argsH 
+ForkQ forks * new ForkCN] ; 
+for(int i-0; i<N;i++Kf orks [i] - new Fork() 
+
+for (int 1*0 ; i<N ; i++) -(new Philosopher (forks [i] , forks [(i+l)Xlf] ) 
+
+> 
+
+
+Fig. 1. The Dining Philosophers 
+
+
+3.2 Detecting Deadlocks By Analyzing Code 
+
+A multi- threaded Java program can naturally be analyzed by simply executing it, or an instrumented 
+version of it, on an existing Java Virtual Machine. This is the solution that we shall eventually 
+explore. However, in this section some alternative solutions will be examined, namely static analysis 
+and model checking. Each tool was applied to the above program, but none of the tools performed 
+convincingly as shall be explained. The experiments were performed on a 2.2 GHz DELL desktop 
+with 2GB available memory, of which 1.5 GB were allocated for the experiment. 
+
+JLint [2] is a static analysis tool, that examines a Java program for a limited set of errors. It does this 
+by analyzing the class files in bytecode format, but without executing them. The errors it can detect 
+can be classified into sequential errors, such as null pointer references and array-out-of-bound errors; 
+and concurrency errors, such as data races and deadlocks. JLint ’s analysis is very local, without 
+considering the larger context of a problem. Also, it does not perform a complicated alias analysis. 
+For these reasons JLint is extremely fast. The above program was analyzed in less than 0.1 second. 
+However, no warnings were emitted, in particular the deadlock potential was not detected. The main 
+reason for this is the use of am array to store the forks and the use of the modulo-operator to create 
+the cyclic ring of philosophers and forks. The program is simply ” too dynamic” in its creation of locks 
+for JLint to detect the problem. 
+
+Java PathFinder (JPF) [23] is a model checker that can analyze a Java program dynamically, by 
+executing it (the class files) on a specialized Java Virtual Machine. JPF, however, not only explores a 
+single-execution .path,. hut .alLexe cut ion-paths^ thereby. exploring-alLpossible. interleavings, of threads 
+in the program. If a resource deadlock is possible, it will then eventually be reached. In order to 
+
+
+5 
+
+
+minimize the search, JPF stores all reached states, and avoids the search of a subtree of a state 
+if that subtree has already been explored before (the state is stored). JPF also uses various other 
+techniques to minimize the search, such as heuristics for prioritizing execution paths. We used a 
+particular heuristics called most -bio eked, which should be suited for this problem. It causes JPF 
+to maximize the number of threads that are blocked. For N = 15 JPF found the deadlock in 32.4 
+seconds using 343 Mid of memory. For N = 20 JPF also found the deadlock, this time in 2 minutes 
+and 51 seconds using 1,45 GB. For N = 21, however, JPF went out of memory after 4 minutes and 
+40 seconds, using 1.46 GB. 
+
+We finally tried to verify a version of the program that did not have a deadlock, to see how well JPF 
+could verify that there were no deadlocks. This forces JPF to explore the entire state space, which of 
+course reduces the amount of philosophers that can be analyzed. The modified version of the program 
+contains a gate lock, say a shared salt shaker, which is taken as the first thing by all philosophers, 
+before they take their forks, hence preventing the cyclic deadlocks. Hence each philosopher performs: 
+
+
+class Philosopher! 
+
+static Object salt.shaJcar » new CbjectO; 
+
+public void nm(){ 
+while (count < 10) { 
+
+synchronized (salt_shaJcer)-( 
+eat () ; 
+
+> 
+
+> 
+
+> 
+
+
+With N = 3 JPF verified the program correct (deadlock free) in 3 minutes, using 256MB. However, 
+with N = 4 JPF goes out of memory after 26 minutes, using 1,46GB. The above program is of course 
+not realistic, but illustrates the point: neither model checking, nor static analysis handles this example 
+convincingly. For model checking this becomes even more clear for real-sized applications. 
+
+
+3.3 Detecting Deadlocks By Analyzing Traces 
+
+An alternative to the above mentioned code analysis techniques is to execute an instrumented version 
+of the program, thereby obtaining an execution trace, and then regard this trace as a dynamic 
+abstract model of the program that can be -analyzed for deadlock symptoms. The assumption is 
+that the program has not deadlocked, and hence the trace does not explicitly represent a deadlock 
+situation. The goal is to determine whether one from the trace can deduce the existence another 
+execution (trace) that deadlocks. In particular, as will be explained in the following, one can apply 
+model checking or specialized analysis (as in static analysis) to the dynamic model. The ad\ r antage 
+of the dynamic model approach is that a dynamic model contains precise information (although only 
+for one trace), whereas a static model as used in JLint typically only contains partial information 
+(although for all traces). 
+
+When analyzing a program for deadlock potentials, we are interested in observing all lock acquisitions 
+and releases. The program can be instrumented to emit such events whenever locks are taken and 
+released. Specifically, we are interested in two types of events: l(t } o ), which means that thread t locks 
+object o ; and u(t, o), which means that thread t unlocks object o. A lock trace a = ei, C 2 j . . . . e n is 
+a finite sequence of lock and unlock events. Let E& denote the set of events occurring in <j. Let T a 
+denote the set of threads occurring in E and let L a denote the set of locks occurring in E a . In 
+the remainder of this paper we assume the existence of an execution trace a obtained by running an 
+instrumented program. We assume for convenience that the trace is reentrant free in the sense that an 
+already. acquired Jo.ck is. .never re-acquired by. the same, thread (or any other thread of course) before 
+being released. Formally this can stated as follows. A trace <j is reentrant free if: 
+
+
+
+6 
+
+
+For all positions i, j s.t. i < j> threads t X} t 2 G T a) and objects o G L a \ if <r[t] = 
+Z(t 1? 0 ) A <j[j] = l fa, o) then there exists k s.t i < k < j A cr[k] = u(t X) o) 
+
+Note that Java supports reentrant locks by allowing a lock to be re-taken by a thread that already has 
+the lock. However, the instrumentation can generate reentrant free traces if it is recorded how many 
+times a lock has been acquired by each thread. Normally a counter is introduced that is incremented 
+for each lock operation and decremented for each unlock operation. A lock operation is only reported 
+if the counter is zero (it is free before being taken), and an unlock operation is only reported if the 
+counter is 0 again after the unlock (it becomes free again). 
+
+^ v 
+
+In the following, two approaches to analyzing traces for deadlock symptoms will be outlined; model 
+checking and use of specialized cycle detection algorithms. We shall conclude that specialized algo- 
+rithms are to be preferred. 
+
+
+3.4 Model Checking Traces 
+
+The idea here is to apply model checking to the execution trace in order to examine all possible 
+interleavings of the trace, and determine whether one of them reaches a deadlock state. This can 
+be done as follows. First we project the trace on each thread in T&. This results in a trace for each 
+thread, which contains exactly those events the thread contributed to the trace. Each such trace 
+can be regarded as an abstract sequential program, denoting a corresponding transition system. The 
+parallel composition (product) of these transition systems can then be formed, and examined for 
+deadlock states. This can be formalized as follows. First we define the projection of the trace cr on 
+each thread in T a , resulting in a transition s 3 /stem for each projection. 
+
+Definition 2 (Projected trace transition systems) Given an execution 
+
+trace <x = e x , e^ - . . , e n with T a == {ti, . . , t m }. Let cr^ be the projection of a on t{ for i G {1, . . . , m}, 
+meaning the trace obtained by eliminating all events not performed by ti. We associate a projected 
+labelled transition system Si = (Qi ) Ei 1 — ►*) for each such that : 
+
+— Qi = {1, 2, . . . , hi }, where ki = \a iu | -f 1, 
+
+— Ei is , and 
+
+— — Qi x Ei x Qi is defined as {(i, cr\ [t],i -fl) j i € {1, . . . , joqt £ |}} 
+
+The states of the transition system for a projected trace are the positions in the projected trace and 
+the events are the events of the trace. The transition relation relates neighbor positions in the trace 
+corresponding to a sequential execution semantics. The product of the obtained transition systems 
+represents the parallel composition of these, and hence represents all possible interleavings of the lock 
+and unlock events from different threads, respecting that locks can only be held by one thread at a 
+time. The composed transition system is defined as follows. 
+
+Definition 3 (Composed trace transition system) Given the projected transition systems Si = 
+
+( Qi,Ei , — ►*), i — 1 , ,771, associated to We define the composition of the transition systems 
+Si , denoted by by (Q,E t — ») where : 
+
+— Q = [Q x x Q 2 x ... x Q m x 2 X ^), A (E) is the set of the resources that occur in the events of E, 
+and 
+
+- E — E x E2 (J • • • U and 
+
+
+C Q x E x Q is defined by : 
+
+
+S{ s' A o g L 
+
+
+( s l) • • ?j s i) • • $m, £) * ($1, • • 5^, • • •, S m , L (J{o}) 
+
+
+
+
+(^1 > • • •> ) • * 
+
+
+., 5m ,£) u ^ o) ( 5l ,... 1 5' ! ... )Smi £\{ 0 }) 
+
+
+( 1 ) 
+
+( 2 ) 
+
+
+A state of the composed transition system includes a set of locks that have been acquired so far. The 
+transition relation defines the interleaved execution of the individual transition systems, updating 
+this set when locks are taken and released. The effect of the set is to prevent a lock to be taken by 
+more than one thread at a time. Hence, a thread cannot proceed if it needs to acquire a lock that is 
+in the set. 
+
+An execution trace a = ei, e 2 , . . . , e n of is a sequence of events such that there exist states 
+
+Si , . . . , s n in Q, such that s 0 $i ■%* s 2 s n , where s 0 = (1, 1, . . . , 1, {}) is the initial 
+
+state, and s n (the last state) can progress no further: there does not exist an event e and a state 
+s n+ i such that s n — » $n+i- We let E denote the set of all execution traces of \\^L l S{. We say that 
+a trace in E is deadlocked if the last state s n is different from the final state where all threads have 
+reached their final state: s n ^ (^i, & 2 > • • * , k mt {}). For such a deadlocked trace a we further say for 
+some thread t and lock o that: 
+
+
+t holds o in a if there exists a position i such that a[i] = /(£, o ), and there does not exist a position 
+j > i such that c [j] = u(t, o). 
+
+— t wants o in cr if the last state s n = (. . . , s*, . . . , C) and s* s Note that in this case o 6 £. 
+
+'We say that the trace cr is deadlock free if the interleaved parallel execution of the projections is 
+deadlock free in the sense of Definition 1. The following lemma states that this can be determined by 
+model checking the composed transition system. 
+
+Lemma 1 (Trace Model Checking for Deadlock Detection). Let W^Si = (Q,E , — *) be the 
+composition of the transition systems Si = (Q u E u — ♦*), i = 1, . . . , m, obtained from projecting the 
+trace a on the m threads in T a . Let E be the set of all execution traces of ||£l 1 iS r t. The trace cr is 
+deadlock free if and only if there are no deadlocked traces in E. 
+
+As an experiment applying this approach, we handcrafted a Java program corresponding to the 
+parallel composition of the individual traces obtained by running the deadlocking program given in 
+section 3.1. Each trace from each thread is essentially 10 calls of the eat() method, resulting in a 
+runO method of the form: 
+
+
+public void ranQ-C 
+
+eat O ; aat 0 ; aat 0 ;aat() ;eatQ ;aat() ;eat C) j eat () ;eatQ ;aat() ; 
+
+} 
+
+The count variable and the while loop have been removed. For N = 25 JPF found the deadlock in 
+14.4 seconds using 105.29 MB of memory. For N = 47 JPF also found the deadlock, this time in 5 
+minutes and 6 seconds using 1,42 GB. For N = 48, however, JPF went out of memory after 6 minutes 
+.and_15-seconds,-Using-L4.6_GB. Althoughfrhesemumbers--are-quiteimpressiveJor.ajmodeI-checker,-the- 
+results are a lot worse in the case of a deadlock free program, where the model checker has to explore 
+
+
+
+s 
+
+
+all the states of the program in order to give a verdict. For N = 3 JPF verified the deadlock free 
+program (introducing the gate lock) correct in 38.6 seconds using 116.53 MB of memory. For N = 4, 
+however, JPF went out of memory after 35 minutes and 26 seconds, using 1.46 GB. Model checking 
+the trace(s) amounts to become complexity wise the same* as model checking an abstraction of the 
+original program, where all statements except synchronization statements have been removed. That 
+is, it compares to model checking a synchronization skeleton [3] or an abstraction [6] of the program. 
+With more than 3 threads, we have seen that this problem can become intractable in practice in 
+the case there are no deadlocks (although the approach seems to have some advantages). The next 
+section explores an alternative. 
+
+3.5 Turning Deadlock Freedom to a Testable Property 
+
+The alternative approach pursued in this paper consists of building (in linear time) a specialized 
+lock graph from the trace, which is then analyzed for cycles. A cyclic dependency between locks 
+suggests that there exists an execution trace of the program that may deadlock. This technique 
+has been implemented in the Visual Threads tool [11], and is mentioned in literature on operating 
+systems [21] [16]. The approach may yield false positives since such a deadlocking execution may not 
+exist due to program logic not visible in the trace - as well as false negatives, since only one trace is 
+examined. The approach is a particular instance of a general approach, where a property p (in our 
+case: deadlock freedom)' is reformulated as a testable property ip (in our case: cycle freedom), which 
+with high probability n will fail on any random execution trace if and only if the program does not 
+satisfy the original property (p for some trace. In the ideal case, the probability n is l.,This ideal 
+case can be formalized as follows, assuming a satisfaction relation j= between traces/programs and 
+properties. 
+
+Definition 4 (Testable property) We say a property ip is a testable property of a program P w.r.t. 
+a property <p if and only if: 
+
+1. if there exists a trace a of P such that a j= ip, then P f= <p 
+
+2. if there exists a trace a of P such that c ip, then P & <p 
+
+In particular 1 is equivalent to \ P \=f implies Vcr € P . <7 ip, which states the desirable property 
+
+that if the program P does not satisfy the property p (that is, there exists a trace which does not 
+
+satisfy < p ) then no matter what execution trace we choose, this will be detected by verifying the 
+property ip. The notion of testable property is an ideal in the sense that if some trace is correct or 
+flawed we conclude the same for all the traces of the program. For the dining philosopher example 
+above this is actually the case. In practice, we cannot rely on this idealized view. Consider for example 
+the following program Pjf consisting of k threads in parallel, where one thread makes a random choice 
+
+
+between 1 and n: 
+
+
+
+Ti: 
+
+T 2 : 
+
+' T k : 
+
+synchr on iz e d (L 1 ) { 
+
+synchronized (L2) { 
+
+synchr onized(Lk) { 
+
+if (randoa(l ,n)"l) 
+
+synchronizad(L3) O 
+
+synchronized (LI) O 
+
+synchronized (L2 ) O 
+
+> 
+
+> 
+
+> 
+
+
+The program P% represents a dining philosopher problem containing a cycle between k threads. The 
+first thread contains a randomized synchronization statement that causes the lock L2 only to be taken 
+if the random function returns 1 amongst the numbers from 1 to n. For a given n this happens with 
+probability 1/n. That is, when running this program there is a probability of 1/n that the deadlock 
+
+- — potential will be _de.te_cte.cLas _a cycle. in -the-iock ..graph Note-that-the-probability-of. .a. -deadlock 
+
+occurring, however, is even lower on an ideally randomized scheduler since all k threads have to in 
+
+
+
+9 
+
+
+addition take their first lock before any one of them attempts to take the second. A model checker will 
+reach complexity limits as A; as well as n grows, while runtime analysis, will yield more false negatives 
+as n grows. For runtime analysis, however, the size of k has no effect, except for memory consumption 
+to store the lock graph. Even though the idealized testable property cannot be' achieved, a property 
+can be practically testable, meaning that the probability n has an acceptable size. In the following 
+we shall present practically testable properties for deadlock-freedom based on the classical algorithm 
+for testing cycle freedom in lock graphs. We shall extend this algorithm to avoid false positives of 
+three different kinds, hence improving the precision of the algorithm. 
+
+4 Trace Algorithm Based on Testable Properties 
+
+The main task performed by the detection algorithm is to find cycles among transactions each waiting 
+for a resource held by the other. In essence, the detection algorithm consists of finding cycles in the 
+lock graph. In the context of multi-threaded programs, the classical algorithm sketched in [11] works 
+as follows. The multi-threaded program under observation is executed, while lock and unlock events 
+are observed. A graph of locks is built, with edges between locks symbolizing locking orders. Any 
+cycle in the graph signifies a potential for a deadlock. The trace algorithm is interesting because it 
+can catch deadlock potentials even though no deadlocks occur in the examined trace, and at the same 
+time it scales very well in contrast to more formal approaches to deadlock detection. This algorithm, 
+however, can yield false positives (as well as false negatives). In this section, we present first the 
+classical algorithm and then we present two conservative extensions of this algorithm that reduce the 
+amount of false positives. W r e start with a through-going example. 
+
+
+4.1 Basic Example 
+
+We shall with an example illustrate the three categories of false positives; The first category, single 
+threaded cycles , refers to cycles that are created by one single thread. Guarded cycles refer to cycles 
+that are guarded by a gate lock ” taken higher” up by all involved threads, as demonstrated by the gate 
+lock introduced in the example in Section 3.2. Finally, thread segmented cycles refer to cycles between 
+thread segments that cannot possibly execute concurrently. The program in Figure 2 illustrates these 
+three situations, and a true positive. 
+
+
+
+Main : 
+
+
+
+01 : aev TlO • start 0 ; 
+
+02: rev T2() - start 0; 
+
+
+Ti : 
+
+T 2 : 
+
+T 3 : 
+
+03: synchronized (G){ 
+
+04: synchronized (LI) { 
+
+05: synchronized (L2)0 
+
+06: > 
+
+07: > ; 
+
+08: t3 - new 73 0 ; 
+
+09: j3. start O; 
+
+10: j3. joinO ; 
+
+H: synchronized CL2K 
+12: synchronized (L 1)0 
+
+13: > 
+
+14: synchronized (G) t 
+15: synchronized(L2)-C 
+
+16 : synchronized (LI )0 
+
+17: > 
+
+18: > 
+
+19: synchronized(Ll){ 
+
+20: synchronized (L2)0 
+
+21: } 
+
+
+Fig. 2. Example containing four cycles, only one of which represents a deadlock potential 
+
+
+10 
+
+
+The real deadlock potential exists between threads T2 and 1 3, corresponding to a cycle on L\ and 
+Z'2- The single threaded cycle within 71 clearly does not represent a deadlock. The guarded cycle 
+between li and T% does not represent a deadlock since both threads must acquire the gate lock G 
+first. Finally, the thread segmented cycle between and T z does not represent a deadlock since T 3 
+will execute before Ti executes its last synchronization segment. 
+
+For illustration purposes we shall assume a non- deadlocking execution trace a for this program* It 
+doesn’t matter which one since all non-deadlocking traces will reveal all four cycles in the program. 
+We shall assume the following trace of line numbered events (the line number is the first argument), 
+which first, after having started Ti and J2 from the Main thread, executes 2*1 until the join statement, 
+then executes T 2 to the end, then T z to the end, and then continues with Ti after it has joined on 
+Tz's termination. The line numbers are given for illustration purposes, and are actually recorded in 
+the implementation in order to provide the user with useful error messages. In addition to the lock 
+and unlock events l(lno,t,o) and u(lno } t, o) for line numbers Ino , threads t and locks o , the trace 
+also contains events for thread start, s(lno , £1,^2) 2nd thread join, j(lno, ti, £2)? meaning respectively 
+that ti starts or joins t 2 in line number Ino. 
+
+
+<r= 5(1, Matin, 7i), s(2, Main,T 2 ) t l(3,T i,G), 1(4, l(5,T lt L 2 ) t u(5,T lt L 2 ), 
+
+s(9,T lt T 3 ), l(14yT 2t G), l(15,T 2) L 2 ), J(16,r 2 ,Li), u(16,T 2 , Li), ■ u(l7,T 2 ,L 2 ) f u(18,T 2 ,G0, l(19,T ai Li). - 
+1(20 , T 3 , L 2 ), u(20,T 3l L 2 ), u(21 t T 3f L 1 ), j(10,T lt T 3 ), 1(11, Ti, La), u(l2, T x , Li), u(13,T lr L 2 ) 
+
+
+In the remaining part of Section 4, we shall present three algorithms for detecting lock cycles in 
+traces, being increasingly precise in eliminating false positives. First we shall present the classical 
+algorithm that yields all four cycles as warnings. The final algorithm yields only the true positive for 
+this example, and no false positives. 
+
+
+4.2 Basic Cycle Detection Algorithm 
+
+We shall initially restrict ourselves to traces including only lock and unlock events (no start or join 
+events). In order to define the lock graph, we introduce a notion that we call a loch context of a trace 
+cr in position i, denoted by Cz,(cr } i). It’s a mapping from each thread to the set of locks owned by 
+that thread at that position. Formally, for a thread t 6 2 ~ ' a we have the following : 
+
+{o | '-j <i A cr[j] — l(t , o) A ->3k : j <k <i A <j[k] ~ u(t, o)} 
+
+Bellow we give a definition that allows to build the lock graph Gl with respect to an execution trace 
+cr. An edge in Gl between two locks li and l 2 means that there exists a thread t who owns the object 
+li while taking the object l 2 . 
+
+
+Definition 5 (Lock graph) Given an execution trace cr = e 2 , . . . , e n . We say that the lock graph 
+
+of a is the minimal directed graph Gl — (L, R) such that: 
+
+— L is the set of locks L a , 
+
+— RC L x L is defined by (li } l 2 ) £ R if there exists a thread t € T a and a position i > 2 in cr such 
+that : 
+
+cr{i] = l(t,l 2 ) and ^ e C L (<7,i ~ l)(t) 
+
+
+The definition 5 above is declarative. In Figure 3 we give an algorithm for constructing the lock graph 
+from a lock trace. In this algorithm, we also use the context Cl wihich. is exactly the same as in the 
+definition- 5. The -only difference is that we don’t need to use explicitly the two parameters i and 
+a. The set of cycles (Section 2) in the graph Gl } denoted by cyicesiGjf)) represents the potential 
+deadlock situations in the program. The lock graph for the example in Figure 2 is also shown in 
+Figure 3. 
+
+
+
+11 
+
+
+Input: An execution trace c 
+Gl is a graph; 
+
+Cl • [ T<r —> 2 l<t \ is a lock context; 
+for(? = 1 .. \a\) do 
+case cr[i] of 
+
+£U Q \ v 
+
+' Gl~G l \J{{o’,o)\o' £C L ( t)}', 
+Cl ” C L t[t~ C L (t) 
+u(t , o) — + 
+
+Cz, := Cx, f 
+
+end; 
+
+for each c in cycles (Gl) do 
+
+print (” deadlock potential:” ,c); 
+
+
+
+Fig- 3. The classical algorithm and the lock graph 
+
+
+4.3 Eliminating Single Threaded Cycles and Guarded Cycles 
+
+In this section we present an algorithm that removes false positives stemming from single threaded 
+cycles and guarded cycles . In [13] a solution was suggested- based on building synchronization trees. 
+However, this solution could only detect deadlocks between pairs of threads. The algorithm to be 
+presented here is not limited in this sense. The solution is to extend the lock graph by labelling each 
+edge between locks with information about which thread causes the addition of the edge and what 
+gate locks were held by that thread when the target lock was taken. The definition of valid cycles will 
+then include this information to filter out false positives. First, we define the extended lock graph. 
+
+
+Definition 6 (Guarded lock graph) Given an execution trace a = ci, e 2 , . . . , e n . We say that the 
+guarded lock graph of <j is the minimal directed labelled graph Gl = (X, W, R) such that: 
+
+
+— L is the set of locks L a 
+
+- W = T a x 2 l is the set of labels , each containing a thread id and a lock set, 
+
+- RC Lx Wx L is defined by (Zi, (t, g ), 1%) € R if there exists a thread t € T a and a position i > 2 
+in a such that: 
+
+a[i) = l(t,l 2 ) and li € C[a, i — l)(t) and g — C{cr,i — 1)(£) 
+
+Each edge (Zi , it, g), I 2 ) in R is labelled with the thread t that took the locks li and Z 2 , and a lock set 
+g , indicating what locks t owned when taking I 2 - In order for a cycle to be valid, and hence regarded 
+as a true positive, the threads and guard sets occurring in labels of the cycle must be valid in the 
+following sense: 
+
+Definition 7 (Valid threads and guards) Let Gl be a guarded lock graph of some execution trace 
+and c = (L, W, R) a cycle in cycles(GL), we say that: 
+
+— threads of c are valid if.forall labels e, e' € W e ^ e' implies thread(e) thread(e / ) 
+
+— guards of c are valid if forall labels e, e r E W e ^ e f implies guards (e) 0 guards(e / ) = 0 
+
+where, for a label e E W, tread(e), resp . guards(e), gives the first, resp. second , component of e. 
+
+
+
+12 
+
+
+Foi a cycle to be valid, the threads involved must differ. This eliminates single threaded cycles. 
+Furthermore, the lock sets on the edges in the cycle must not overlap. This eliminates cycles that 
+are guarded by the same lock taken "higher up” by at least two of the threads involved in the cycle. 
+Assume namely that such a gate- lock exists, then it will belong to the lock sets of several edges in the 
+cycle, and hence they will overlap at least on this lock. This corresponds to the fact that a deadlock 
+cannot happen in this situation. Valid cycles are now defined as follow's: 
+
+Definition 8 (Guarded cycles) Let a be an execution trace and G L its guarded lock graph. We 
+say that a cycle c € cycle$(G L ) is a guarded cycle if the guards of c are valid and threads of c are 
+also valid. We denote by cycles g (G if) the set of guarded cycles in cycles(Gi). 
+
+We shall in this section not present an explicit algorithm for constructing this graph, since its con- 
+cerns a relatively simple modification to the basic algorithm: the statement that updates the lock 
+graph becomes: G'i :— Gi (J {(of (t, C(t)) } o) J o' € C(i)}, adding the labels (t,C(t)) to the edges. 
+Furthermore, cycles to be reported should be drawn from: cycles g (G L ). 
+
+Let us illustrate the algorithm with an example. We consider again the execution trace a presented in 
+Subsection 4.1. The guarded graph for this trace is shown in Figure 4. The graph contains the same 
+number of edges as the basic graph in Figure 3. However, now edges are labelled with a thread and 
+a guard set. In particular, we notice that the gate lock G occurs in the guard set of edges (4, 5) and 
+(15, 16). This prevents this guarded cycle from being included in the set of valid cycles since it is not 
+guard valid: the guard sets overlap in G. Also the single threaded cycle (4, 5) *■+ (11, 12) is eliminated 
+because it is not thread valid: the same thread Ti occurs on both edges. 
+
+
+
+Fig. 4. Guarded lock graph 
+
+
+The correctness of the guarded algorithm is stated in the following theorem, which states that any 
+valid cycle reported by the algorithm for a trace a corresponds to a deadlock situation in the composed 
+transition system, and vice versa. We say that an execution trace a reflects a cycle c= (L,W,R) if 
+forall (li t (£, G), I2) € R, t holds l\ in a, and t wants I2 in c (see Section 3.4 for a definition these 
+terms). 
+
+Theorem 1 (Correctness of guarded cycles). Let a be an execution trace, Gi its guarded lock 
+graph, and cycles g (Gi) the set of the guarded cycles . Let E be the set of all the execution traces of 
+the system where the transition systems Si, i = 1, are obtained from projecting the 
+
+trace a on the m threads in T a . Then: 
+
+- far Jill cycles, c e. .cycles g .(G.i). s there exists an execution trace a' in E, such that a' is 
+deadlocked and reflects c (no false positives with respect to a). 
+
+
+i 
+
+
+! 
+
+
+g 
+
+
+
+
+
+l 
+
+
+— for all traces a* in U, if a f is deadlocked, then there exists a cycle c 6 cycles^Gi), such 
+that cr f reflects c (no false negatives with respect to a). 
+
+
+13 
+
+
+Note that when the above theorem states that there are -no false positives or negatives, it is with 
+respect to the execution trace a. There may still be false positives and negatives with respect to the 
+program, the execution of which resulted in the trace. The guarded deadlock algorithm may in rare 
+cases miss deadlocks that the classical algorithm finds. As an example consider the program in Figure 
+2, and consider that the guard G in T 2 is computed as the result of a conditional statement, in one 
+run it may be (7, while in another run it may be G' : different from G. In the latter case, the cycle 
+between L\ and L 2 in threads Xi and T 2 is not guarded and there is a deadlock potential. The basic 
+algorithm will detect this irrespective of whether G or G* is chosen, while the guarded algorithm wall 
+not in case G is chosen. Due to this observation one could report even guarded cycles, but marking 
+them as likely less severe. 
+
+4.4 Eliminating Segmented Cycles 
+
+In the previous section we saw the specification of an algorithm that removes false positives stem- 
+ming from single threaded cycles and guarded cycles. In this section we present an algorithm that 
+furthermore removes false positives stemming from segmented cycles . We assume that traces now also 
+contain start and joint events. Recall the example in Figure 2 and that the basic algorithm reports a 
+cycle between threads 7\ (line 11-12) and T3 (line 19-20) on locks Li and Do. However, a deadlock is 
+impossible since thread Z3 is joined on by T\ in line 10. Hence, the two code segments : line 11-12 and 
+line 19-20 can never run in parallel. The algorithm to be presented will prevent such cycles from being 
+reported by formally introducing such a notion of segments that cannot execute in parallel. A new 
+directed segmentation graph will record which segments execute before others. The lock graph is then 
+extended with extra label information, that specifies what segments locks are acquired in, and the 
+validity of a cycle now incorporates a check that the lock acquisitions are really occurring in parallel 
+executing segments. The idea of using segmentation in runtime analysis was initially suggested in [11] 
+to reduce the amount of false positives in data race analysis using the Eraser algorithm [20]. We use 
+it in a similar manner here to reduce false positives in deadlock detection. 
+
+More specifically, the solution is during execution to associate segment identifiers (natural numbers, 
+starting from 0) to segments of the code that are separated by statements that start or join other 
+threads. For example, if a thread £1 currently is in segment s and starts another thread £2; and the 
+next free segment is n y then £1 will continue in segment n and £2 will start in segment n 4* 1 (it could 
+have been chosen differently, the main point being that new segments are allocated). From then on 
+the next free segment will be n + 2. It is furthermore recorded in the segmentation graph that segment 
+s executes before n as well as before n 4- 1. In a similar way, if a thread £j currently is in segment 
+Si and joins another thread £2 that is in segment S 2 , and the next free segment is n, then £1 will 
+continue in segment n , £2 will be terminated, and from then on the next free segment will be n 4 1. 
+
+It is recorded that si as well as S2 execute before n. Figure 6 illustrates the segmentation graph for 
+the program example in Figure 2. Below’ we shall formalise these concepts, and finally suggest an 
+algorithm. 
+
+In order to give a formal definition of the segmentation we need to define two functions. The first one, 
+£5(0*), segmentation context of the trace < 7 , gives for each position i of the execution trace cr, the current 
+segment of each thread t at that position. Formally, Cs(<x) is the mapping with type: [A f ^ [T# »-> Af]], 
+associated to trace <7, that maps each position into another mapping that maps each thread id to’ its 
+'current segment in that position. It is defined as follows. Let C^ xt = [0 w [main 0]], mapping 
+position 0 to the mapping that maps the main thread to segment 0. Then C s (cr) is defined by the use 
+°f_the_the auxiliary function /o : Trace x Context x Positio n x Current-Segment — *• Context: 
+
+CsW^McT'C?*,!^) (3) 
+
+
+
+14 
+
+
+fo(e ^ a, Cs,i, n) 
+
+
+fo(<> : Cs . i, n) 
+
+The second function needed, # a iioc> gives the number of segments allocated in position i of a . This 
+
+function is used to calculate what is the next segment to be assigned to a new execution block (the 
+ns in the above example), and is dependent on the number of start events s(f 1} t 2 ) and join events 
+j(h> h) that occur in the trace up and until position i y recalling that each start event causes two new 
+segments to be allocated. Formally we define it as follows : rraHocfai) = k* l s | * 2 + |cr* [j |. 
+
+We can now define the notion of a directed segmentation graph , which' defines an ordering between 
+segments. Informally, assume that in trace position i a thread ti, being in segment $1 = Cs(cr)(i — 
+l)(£i), executes a start of a thread t 2 . Then t± continues in segment n = # a aoc(<M — 1) -f 1 and t 2 
+continues in segment n 4- 1. Consequently, (si , n) as well as (si, n -f 1) belongs to the graph, meaning 
+that si executes before n as well as before n + 1. Similarly, assume that a thread ti in position i , being 
+in segment si = C §{&){% — executes a join of a thread t 2 > being in segment s 2 = l)fe)- 
+
+Then ti continues in segment n = #alloc(&> i ~ 1) +1 while t 2 terminates. Consequently (s*, ra) as well 
+as (> 2 , n) belongs to the graph, meaning that si as well as s 2 executes before n. The formal definition 
+of the segmentation graph is as follows. 
+
+Definition 9 (Segmentation graph) Given an execution trace c = e\, e 2 , e n . We say f/nzf <2 
+segmentation graph of a is the directed graph G$ — {Af, R) where 
+
+— Af — {n \n is a natural number } is the set of segments 
+
+— R C Af x Af is the relation given by (si, s 2 ) € R if there exists a position i > 1 such that 
+
+<t[z\ = $(ti,t 2 )/\si = A(s 2 = #aUoc(<^-l) + l Vs 2 = # a n oc (cr, i-l) + 2) 
+
+or 
+
+0 -[xj = i(ti, t 2 ) A 51 = Cs(?)(i - l)(il) A s 2 = #alloc(v, i- I) + 1 
+
+Given a segmentation graph, we can now define what it means for a segment to happen before another 
+segment, reflecting how the segments are related in time during execution. 
+
+Definition 10 (Happens-Before relation) Let Gs = (. Af , R) be a segmentation graph, and G * s = 
+{Af, R *) its transitive closure. Then given two segments s\ and s 2 , we say that si happens before s 2f 
+denoted by 5 ^ 52 , if (si , s 2 ) € R * . 
+
+Note that for two given segments $1 and s 2 , if neither > s 2 nor s 2 >Si, then we say that si happens 
+in parallel with s 2 - Before we can finally define what is a lock graph with segment information, we 
+need to redefine the notion of lock context, Cl{ct , t), of a trace a and a position i, that was defined 
+on page 10. In the previous definition it was a mapping from each thread to the set of locks owned 
+by that thread at that position. Now we add information about what segment each lock was taken 
+in. Formally, for a thread t € T a we have the following : 
+
+C L (g: x iX(t}= 
+
+{(<?, s) | Bj : j < i A cr[j] = l(t, 0 ) A Cs(cr)(j)(t) = s A : j <k<i A <r[i] = tt(f, 0 )} 
+
+
+/o(<A Cs, i 4- 1, n) if e € {l(t,o),u(t',o)}, 
+
+! n -f 1 I 
+
+
+= <j / 0 (<r,Csf[i ^ - l]f jy ^ n + 2 j + l,n-f-2) if e = s(*i,f 3 ), (4) 
+
+. /o(<r,Cst[i »-► C 5 [i — n + 1], i 4- 1, n 4- 1) if e = j(t\, t 2 )* 
+
+
+= Cs 
+
+
+(5) 
+
+
+
+We can now give a definition of a lock graph Gl with respect to an execution trace cr, that contains 
+segment information as well as gate lock information. An edge in Gl between two locks li and l 2 
+means, as before, that there exists a thread t who owns an object l\ while taking the object l 2 . The 
+edge is as before labelled with t as well as the set of (gate) locks. In addition, the edge is now further 
+labelled with the segments Si and S 2 in which the locks li and I 2 were taken by t. 
+
+Definition 11 (Segmented and guarded lock graph) Given an execution trace <7 = ex, e 2 , e n . 
+We say that the segmented and guarded lock graph of a is the minimal directed graph Gl = (To-, W t R) 
+such that: 
+
+
+— W = Af x (To- x 2 L<r ) x ff is the set of labels (si, (£, g), s 2 ) } each containing the segment Si that 
+the source lock was taken in, a thread id t, a lock set g (these two being the labels of the guarded 
+lock graph in the previous section ), and the segment S 2 that the target lock was taken in, 
+
+— R C L a x W x L a is defined by (Zj, (si, (i. g), S 2 ). h) € R if there exists a thread t 6 T a and a 
+position i > 2 in cr such that: 
+
+cr[i] = l(t, I 2 ) and 
+
+(h,Si) € Cl(<t)(% — l)(t) and 
+
+g = {V I € Cl(<7)(z -l)(t)} and 
+
+52 = Cs{e){i ~ 1 ){t) 
+
+Each edge (lx, (si, (t.g), $ 2 ), h) in R is labelled with the thread t that took the locks l\ and l 2 , and 
+a lock set g , indicating what locks t owned when taking l 2 . Furthermore, the segments $1 and S 2 
+indicate in which segments respectively li and I 2 were taken. 
+
+In order for a cycle to be valid, and hence regarded as a true positive, the threads and guard sets 
+occurring in labels of the cycle must be valid as before. In addition, the segments in which locks are 
+taken must now allow for a deadlock to actually happen. Consider for example a cycle between two 
+threads ti and t 2 on two locks li and l 2 : Assume further that ti takes li in segment xi and then l 2 in 
+segment x 2 while t 2 takes them in opposite order, in segments y\ and 2/2 respectively. Then it must 
+be possible for ti and t 2 to each take their first lock in order for a deadlock to occur. In other words, 
+x 2 must not happen before yi and y 2 must not happen before x\. This is expressed in the following 
+definition, which repeats the definitions from Definition 7. 
+
+Definition 12 (Valid threads, guards and segments) Let Gl be a segmented and guarded lock 
+graph of some execution trace and c = (L, W, R) a cycle in cycles(GL), we say that: 
+
+— threads of c are valid if forall labels e, e' 6 IV, e ^ t ! implies thread(e) =£ thread(e f ) 
+
+— guards of c are valid if forall labels e, e l 6 W, e ^ e r implies guards(e) O guards(e / ) == 0 
+
+— segments of c are valid if forall labels e,e' € W, e ^ e f implies -» (seg 2 (ei)> segi(e 2 )) 
+
+where , for a label e = (si, (t, g),s 2 ) € W } tread(e) = t, guards(e) = g, segi(e) — Si and seg 2 {e) = S 2 - 
+Valid cycles are now defined as follows. 
+
+Definition 13 (Segmented and guarded cycles) Let a be an execution trace and Gl #5 seg- 
+mented and guarded lock graph. We say that a cycle c € cydes{Gi) is a segmented and guarded cycle 
+if the^guards. of.c are valid, -the threads of.c are valid^ anduthe. segments of c are valid. We denote by 
+cycles s {GL) the set of segmented and guarded cycles in cycles(G l) • 
+
+
+
+16 
+
+
+The definitions of segmentation graph (Definition 9) and segmented and guarded lock graph (Defini- 
+tion 11) above are declarative. Figure 5 presents an algorithm for constructing the segmentation graph 
+and lock graph from an execution trace. The set of cycles in the graph Gfi, denoted by cylces s (Gi) i 
+see Definition 13, represents the potential deadlock situations in the program. The segmentation 
+graph (Gs) and lock graph (Gl) have the structure as outlined in Definition 9 and Definition 11 
+respectively. The lock context (Cl) maps each thread to the set of locks owned by that thread at any 
+point m time. Associated with each such lock is the segment in which it was acquired. The segment 
+context (Cs) maps each thread to the segment in which it is currently executing. The algorithm 
+should after this explanation and the previously given abstract definitions be self explanatory. 
+
+
+Input: An execution trace a 
+Gl is a lock graph; 
+
+Gs is a segmentation graph; 
+
+Cl - [Tr — + 2 ier><nat j is a lock context; 
+
+Cs : [To- — * nat] is a segment context; 
+n : nat = 1 next available segment; 
+for(i = 1 .. jcr|) do 
+case cr[i ] of 
+l(t,o) -+ 
+
+Gl := Gl (J {(o', ($i, (t 1 g),$2),o) | 
+
+(</,si) € C L (t) A 
+g = {<?" | (o" , s } € C L (t)} A 
+5 2 = Cs(£)}; 
+
+u(tf o) 
+
+CL:=C L Ut~CL(t)\{(o } *)}h 
+s(tl,t 2 ) “ ► 
+
+Cs := Gs (J {(Gs(ti),n), (Cs(ti),n -f 1)}; 
+
+Gs Gs f [ti ^n,t 2 ^n + 1]; 
+n := n + 2; 
+j(ti,t 2 ) -*■ 
+
+Gs :» Gs U {(Gs(ti), n), (C s (t 2 ), »)}; 
+
+Cs := Gs f [ti <—<■ n); 
+n:=n + l; 
+
+end; 
+
+for each c in cycles s (GL) do 
+
+print (’’deadlock potential:”, c); 
+
+Fig. 5. The final algorithm and the segmented lock graph 
+
+
+
+Let us illustrate the algorithm with our example. We consider again the execution trace a presented 
+in Subsection 4.1. The segmentation graph for this trace is shown in Figure 6 and the segmented 
+and guarded lock graph is shown in Figure 5. The segmentation graph is for illustrative purposes 
+augmented with the statements that caused the graph to be updated. We see in particular that 
+segment 6 of thread T 3 executes before segment 7 of thread Ti, written as 6 > 7. Segment 6 is the one 
+in which T 3 executes lines 19 and 20, while segment 7 is the one in which Ti executes lines 11 and 12. 
+The lock graph contains the same number of edges as the guarded graph in Figure 4, and the same 
+(thread, guard set) labels. However, now edges are additionally labelled with the segments in w'hich 
+]pd?s_ag^ takem Jhis .makes the cycle . .(19, 20) (11, 12). seg ment invalid sinc e the. target segment of 
+the first edge (6) executes before the source segment of the second edge (7). 
+
+
+
+T1 
+T2 
+T3 
+
+Fig. 6. Segmentation graph 
+
+
+Concerning the correctness of the algorithm, a theorem similar to Theorem 1 can be formulated. 
+However, the notion of composed transition system, as formulated in Definition 3, must be changed 
+to incorporate start and join events. We shall not do that here, but just mention that two new rules 
+must be added: one for start events s(£i,£ 2 ) that adds the initial state of thread £ 2 to the state, and 
+one for join events that is conditioned with the terminated status of £ 2 - We say that an 
+
+execution trace a reflects a cycle c = (L t W, R) if forall (l lt , (£, g) : s 2 ), l 2 ) £ R, t holds h in a, and 
+t wants I 2 in a (see Section 3.4 for a definition these terms). The correctness is now stated as follows 
+(equivalent in formulation to Theorem 1 . except for the use of cycles s instead of cycles g ). 
+
+Theorem 2 (Correctness of segmented and guarded cycles). Let cr be an execution trace , Gl 
+its segmented and guarded lock graph and cycles s (Gi ) the set of segmented and guarded cycles. Let 
+£ be the set of execution traces of the system where the transition systems Si, i — 1, . . . , m, 
+
+are obtained from projecting the trace a on the m threads in T a . Then: 
+
+— for all cycles c 6 cycles s (Gl), there exists an execution trace a 1 in E, such that cr' is 
+deadlocked and reflects c (no false positives with respect to a). 
+
+— for all traces a 1 in E, if a f is deadlocked , then there exists a cycle c € cycles S {G l), such 
+that ex' reflects c (no false negatives with respect to cr). 
+
+5 Implementation and Experimentation 
+
+The algorithm presented in Section 4.4 has been implemented in the Java PathExplorer tool [14], in 
+short referred to as JPaX. JPaX analyzes Java programs for deadlocks, using the presented algorithm, 
+and for data races, using a homegrown adaption of the Eraser algorithm [20] to work for Java. In 
+the following we shall primarily focus on the deadlock analysis. JPaX itself is written in Java, and 
+consists of two main modules, an instrumentation module and an observer module . The instrumenta- 
+tion module automatically instruments the bytecode class files of a compiled program by adding new 
+instructions that when executed generate the execution trace consisting of the events needed for the 
+analysis. In our case lock events l(t,o) and unlock events if(£,o), together with start events s(£i,£ 2 ) 
+and join events ^(£ 1 ,^ 2 ) are generated. The generated events are either sent to a socket or written to 
+a file (in both cases in plain text format), depending on whether the analysis should be on- the- fly. 
+during the execution of the analyzed program, or whether it is acceptable that it is performed after 
+the analyzed program has terminated. The file solution has been the one most frequently used in our 
+case studies. The observer module consequently reads the event stream and dispatches this to a set of 
+observer rules, each rule performing a particular analysis that has been requested, such as deadlock 
+analysis_and_data_rac.e_analysis,._This_madular. rule_.based_design_allows. a user .to easily define new 
+runtime verification procedures without interfering with legacy code. 
+
+
+
+
+
+
+
+
+
+
+
+18 
+
+
+The Java bytecode instrumentation is performed using the Jtrek Java bytecode engineering tool [4]. 
+Jtrek makes it possible to easily read Java class files (bytecode files), and traverse them as abstract 
+syntax trees while examining their contents, and insert new code. The inserted code can access the 
+contents of various runtime- data structures, such as for example the call-time stack, and will, when 
+eventually executed, emit events carrying this extracted information to the observer. As already 
+mentioned, this form of analysis is not complete and hence may yield false negatives by missing to 
+report synchronization problems. A synchronization problem can most obviously be missed if one 
+or more of the synchronization statements involved in the problem do not get executed. To avoid 
+being entirely in the dark in these situations, we added a coverage module to the system that records 
+what lock-related instructions are instrumented and which of these that are actually executed. The 
+difference is printed as part of the error report for the user to react on, for example by generating 
+better test cases. 
+
+JPaX has been applied to two case studies at NASA Ames: a planetary rover controller (named 
+K9), and a space craft altitude control system (ACS), both being translated to Java from C+- {- and 
+C respectively as part of an attempt to evaluate Java for mission software. 2 resource deadlocks 
+and 2 data races were seeded in the rover code by an independent team. JPaX found them all. In 
+addition, an early version of the deadlock algorithm found a deadlock in the original C++ version 
+of K9 that was unexpected by the programmer. This experiment was performed by creating a C++ 
+specific instrumentation module, whereas the observer module could be unmodified. In ACS, JPaX 
+found 2 unexpected data races and 2 seeded data races. We also applied the JPaX deadlock analysis 
+algorithm to the dini n g philosopher example mentioned in Section 3.1. For the deadlocking version, 
+for N = 1G0 JPaX found the deadlock in 8 seconds, including instrumentation. For N = 300 JPaX 
+found the deadlock in 22 seconds. For the deadlock free version, for N = 4 JPaX concluded correctness 
+in 7- seconds, for N = 100 in 30 seconds, and for N = 300 in 2 minutes, out of which 40 seconds were 
+due to a slowdown in the running program due to instrumentation. This slowdown will be diminished 
+considerably in future work. 
+
+6 Conclusions 
+
+An algorithm has been presented for detecting deadlock potentials in concurrent programs by an- 
+alyzing execution traces. The algorithm extends a classical algorithm by reducing the amount of 
+false. positives reported, and has been implemented in the Java PathExplorer tool that in addition 
+to deadlocks also analyzes for data races and for consistency with user provided temporal properties. 
+Although JPaX analyzes Java programs, it can be applied to applications written in other languages 
+by modifying the instrumentation module. The advantage of trace analysis is that it scales extremely 
+well, in contrast to more formal methods, and in addition can detect errors that for example static 
+analysis cannot properly detect. In future work, we expect to approach the problem of false negatives 
+(missed errors) by developing a framework for symbolically inferring what test cases are needed to 
+exercise all synchronization statements in a program. At an extreme, static analysis of deadlocks can 
+be combined with dynamic analysis. Current work attempts to extend the capabilities of JPaX with 
+new algorithms for detecting other kinds of concurrency errors, such as other forms of data races 
+and communication deadlocks. An additional important issue that we will address is the performance 
+impact on the instrumented program. 
+
+References 
+
+1. K. Arnold and J. Gosling. The Java Programming Language. Addison- Wesley, .1996. 
+
+2. C. Artho and A. Biere. Applying Static Analysis to Large-Scale; Multithreaded Java Programs. In 
+-Dt- G rant-edit or- iJthAustralien-Software~Engineering~Confersnce,-^pa.§es-68-T-5,LEEE-Qoznputer-Society,- 
+August 2001. 
+
+
+19 
+
+
+3. T. Ball, A. Podelski, and S. Rajamani. Boolean and Cartesian Abstractions for Model Checking C 
+Programs. In Proceedings of T AC AS '01: Tools and Algorithms for the Construction and Analysis of 
+Systems , LNCS, Genova, Italy, April 2001. 
+
+4. S. Cohen. Jtrek. Compaq, 
+
+http : / /vw . Compaq . com/ java/ download/ jtrek. 
+
+5. J. Corbett. Evaluating deadlock detection methods for concurrent software. IEEE Transaction on Soft- 
+ware Engineering , pages 1-22, March 1996. 
+
+6. J. Corbett, M. B. Dwyer, J. Hatciiff, C. S. Pasareanu, Robby, S. Laubach, and H. Zheng. Bandera : Ex- 
+tracting Finite-state Models from Java Source Code. In Proceedings of the 22nd International Conference 
+on Software Engineering , Limerich, Ireland, June 2000. ACM Press. 
+
+7. C. Demartini, R. Iosif, and R. Sisto. A Deadlock Detection Tool for Concurrent Java Programs. Software 
+Practice and Experience , 29(7):577-603, July 1999. 
+
+8. D. L. Detlefs, K. Rustan, M. Leino, G. Nelson, and J. B. Saxe. Extended Static Checking. Technical 
+Report 159, Compaq Systems Research Center, Palo Alto, California, USA, 1998. 
+
+9. E. 'W. Dijkstra. Co-operating Sequential Processes. In F. Genuys, editor, Programming Languages , pages 
+4o— 112. New York Academic Press, 1968. 
+
+10 - P-^podefroid. Model Checking for Programming Languages using VeriSoft. In Proceedings of the 24th 
+A^M Symposium on Principles of Programming Languages , pages 174-186, Paris, Prance, January 1997. 
+
+11. J. Harrow. Runtime Checking of Multithreaded Applications with Visual Threads. In SPIN Model 
+
+Checking and Software Verification, volume 1885 of LNCS, pages 331-342. Springer, 2000? 
+
+12. K. Haveiund and T. Pressburger. Model Checking Java Programs using Java PathFinder. International 
+Journal on Software Tools for Technology Transfer, 2(4):366-381, April 2000. Special issue of STTT 
+containing selected submissions to the 4th SPIN workshop, Paris, France, 1998. 
+
+13. Klaus Haveiund. Using Rimtime Analysis to Guide Model Checking of Java Programs. In Klaus Haveiund, 
+
+ohn Penix, and Willem Visser, editors, SPIN Model Checking and Software Verification, volume 1885 of 
+LNCS , pages 245-264. Springer, 2000. 
+
+14. Klaus Haveiund and Grigore Ro§u. Monitoring Java Programs with Java PathExplorer. In Klaus Haveiund 
+and Gngore Ro§u,^ editors, Proceedings of the First International Workshop on Runtime Verification 
+(RV 01), volume 55 of Electronic Notes in Theoretical Computer Science, pages 97-114 Paris Prance 
+July 2001. Elsevier Science. 
+
+15. Gerard J. Holzmann and Margaret H. Smith'. A Practical Method for Verifying Event-Driven Software. 
+
+In. Proceedings of ICSE’99, International Conference on Software Engineering, Eos' 1 Angeles, California 
+USA, May 1999. IEEE/ACM. 
+
+16. E. Knapp. Deadlock Detection in Distributed Database Systems. ACM Computing Surveys , pa<ms 303- 
+
+328, Dec. 1987. * * y 6 
+
+17. D. Lea. Concurrent Programming in Java, Design Principles and Patterns. Addison- Wesley, 1997. 
+
+18. B. Nichols, D. Buttlar, and J. P. Farrell. Pthreads Programming. O’Re illy, 1998. 
+
+19. PolySpace. An Automatic Run-Time Error Detection Tool, 
+http ; / /www. polyspace . com. 
+
+20. S. Savage, M. Burrows, G. Nelson, P. Sobalvarro, and T. Anderson. Eraser A Dynamic Data Race De- 
+tector for Multithreaded Programs. ACM Transactions on Computer Systems, 15i4):391-411 November 
+
+
+21 . 
+
+22 . 
+
+23. 
+
+
+M. Smghal. Deadlock detection in distributed systems. IEEE Computer , pages 37-48, Nov. 1989. 
+
+S. D. S toller. Mo del- Che eking Multi-threaded Distributed Java Programs. In SPIN Model Checking and 
+Software Verification , volume 1885 of LNCS, pages 224-244. Springer, 2000. 
+
+Vw. Visser, K. Haveiund, G. Brat, and S. Park. Model Checking Programs. In Proceedings of ASE’2000: 
+The 15th IEEE International Conference on Automated Software Engineering. IEEE CS Press, September 
+2000 . 
+
+
+
+

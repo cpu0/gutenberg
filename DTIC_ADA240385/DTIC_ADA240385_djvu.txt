@@ -1,0 +1,4659 @@
+A240,385 otic 
+
+iiliililii' ^ ELECTF^ » 
+
+NASA Contractor Report 187613 SEPi 2 1991 i 
+
+
+ICASE INTERIM REPORT 18 
+
+
+SINGLE-BLOCK NAVIER-STOKES INTEGRATOR 
+
+
+P. A. Jacobs 
+
+
+NASA Contract No. NASl-18605 
+July 1991 
+
+
+INSTITUTE FOR COMPUTER APPLICATIONS IN SCIENCE AND ENGINEERING 
+NASA Langley Research Center, Hampton, Virginia 2S665 
+
+Operated by the Universities Space Research Association 
+
+
+91-10352 
+
+** .......-.,t« «i*» itii 
+
+
+ill* 
+
+
+
+
+Distribu'ion __— 
+
+
+
+National Aeronautics and 
+Space Administiafion 
+
+Langley Research Center 
+Hampton. Virginia 23665-5225 
+
+
+0 4 2 - 
+
+
+
+
+
+
+
+
+ICASE INTERIM REPORTS 
+
+
+ICASE has introduced a new report series to be called ICASE Interim Reports. 
+The series will complement the more familiar blue ICASE reports that have been 
+distributed for many years. The blue reports are intended as preprints of 
+research that has been submitted for publication in either refereed journals or 
+conference proceedings. In general, the green Interim Report will not be submit¬ 
+ted for publication, at hast not in its printed form. It will be u.sed for research 
+that has reached a certain level of maturity but needs additional refinement, for 
+technical leviews or position statements, for bibliographies, and for computei 
+software. The Interim Reports will receive the same distribution as the ICASE 
+Reports. They will be available upon request in the future, and they may be 
+referenced in other publications. 
+
+
+Robert G. Voigt 
+Director 
+
+
+
+
+
+.icovnsloc For 
+
+GRAkl' 
+BtiC IAS 
+Uuftano'Ujoed 
+Justirioatton. 
+
+
+
+j By 
+
+I Dis tribution/ 
+
+I Avail abliitjr Cod*8 
+
+
+Dlst 
+
+
+jAvail aad/or 
+Spoolal 
+
+
+SINGLE-BLOCK NAVIER-STOKES INTEGRATOR 
+
+
+P. A. Jacobs^ 
+
+Institute for Computer Applications in Science and Engineering 
+NASA Langley Research Center 
+Hampton, VA 23665 
+
+
+ABSTRACT 
+
+This report describes a program for the time-integration of the Navier-Stokes equations 
+on a two-dimensional structured mesh. The flow geometry may be either planar or axisym- 
+metric. The unusual features of this program are that it is written in C and makes extensive 
+use of sophisticated data structures to encapsulate the data. The idea of writing the code 
+this way is to make it eeisier (than traditional FORTRAN codes) to “parallelize” for the 
+Multiple-Instruction-Multiple-Data style of parallel computer. 
+
+The integral form of the governing equations are given for cartesian coordinates and then 
+the particular discretization used in the code is described. A derivation of the axisymmetric 
+equations is given in an appendix. The full version of the code describes a flow domain as a set 
+of abutting blocks, each consisting of a tensor-product mesh of quadrilateral cells. However, 
+this report considers only the single-block version of the code. The flow field is recorded 
+as cell-average values at cell centres and explicit time stepping is used to update conserved 
+quantities. MUSCL-type interpolation and a three-stage Riemann solver are used to calculate 
+inviscid fluxes across cell faces while central differences (via the divergence theorem) are used 
+to calculate the viscous fluxes. The Riemann solver is suitable for flows with very strong 
+shocks and does not require the entropy fix cis applied to the Roe-type solvers. Because 
+the code is intended to be a test-bed for implementatioii on parallel computers, the coding 
+details are described in some detail. 
+
+A set of test problems is also included. These exercise various parts of the code and 
+should be useful for both validation and performance measurements of the (future) parallel 
+implementations. 
+
+
+^Research was supported by the National Aeronautics and Space Administration under NASA Contract 
+No. NASl-18605 while the author was in residence at the Institute for Computer Applications in Science 
+and Engineering (ICASE), NASA Langley Research Center, Hampton, VA 23665. 
+
+
+1 
+
+
+
+
+
+
+
+
+
+
+Contents 
+
+
+1 Introduction 5 
+
+2 Governing Equations 6 
+
+2.1 Spatial Discretization and Data Storage. 7 
+
+2.2 Inviscid Flux Calculation. 9 
+
+2.2.1 Inviscid Boundary Conditions. 9 
+
+2.2.2 Interpolation of the Interface State. 9 
+
+2.2.3 Riemann Solver. 11 
+
+2.3 Viscous Flux Calculation. 14 
+
+2.3.1 Viscous Boundary Conditions. 15 
+
+2.4 Time Stepping. 15 
+
+2.5 Computational Effort. 16 
+
+3 Test Cases 17 
+
+3.1 One-dimensional Shock Tube. 17 
+
+3.2 High-Temperature Shock Tube. 17 
+
+3.3 Double Mach Reflection. 18 
+
+3.4 Flat Plate Boundary Layer. 19 
+
+3.5 Inviscid Flow over a Cone. 20 
+
+3.6 Viscous Flow along a Cylinder. 21 
+
+3.7 High Mach Number Flow around a Sphere. 22 
+
+4 Concluding Remarks 24 
+
+A Axisymmetric Flow Geometry 28 
+
+A.l Governing Equations in Cartesian Coordinates. 29 
+
+A.2 Application to the Axisymmetric Cell. 30 
+
+A.3 Treatment of the interfaces at 0 = ±‘ip . 31 
+
+A.4 Summary of the Axisymmetric Equations. 32 
+
+B Approximate Power Routine 34 
+
+C Header File 35 
+
+
+2 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Nomenclature, Units 
+
+A : (x, 2 /)-plane cell area 
+
+A : data structure name 
+
+a : local speed of sound, m/s 
+
+Cp : coefficient of heat capacity (constant P), Jfkg 
+
+Cv : coefficient of heat capacity (constant volume), J/kg 
+
+D : molecular diffusion coefficient 
+
+E : total energy (internal + kinetic), J/kg 
+
+e : specific internal energy, J/kg 
+
+e : unit vector 
+
+F : algebraic vector of x-component fluxes 
+
+/ : species mass fraction 
+
+G : algebraic vector of y-component fluxes 
+
+h ; specific enthalpy, J/kg 
+
+k : coefficient of thermal conductivity 
+
+L : length of interface in the (x, t/)-plane 
+
+n : direction cosine 
+
+n : unit normal vector 
+
+P : pressure. Pa 
+
+Pr : Prandtl number, {Cp(i/k) 
+
+Q : algebraic vector of source terms 
+q ; heat flux 
+
+R : gas constant, J/kg/K 
+
+Re : Reynolds number 
+
+r : radial coordinate, m 
+
+S : control surface of the cell 
+
+T : temperature, K 
+
+i : time, s 
+
+At : time step, s 
+
+U : algebraic vector of conserved quantities 
+
+U : Riemann invariant 
+
+u : x-component of velocity, m/s 
+
+V : 7/-component of velocity, m/s 
+
+V : diffusion velocity 
+
+ws : wave speed used in the Riemann solver 
+X : x-coordinate, m 
+
+y : y-coordinate, m 
+
+2 : : ^-coordinate, m 
+
+Z : intermediate variable used in the Riemann solver 
+
+
+3 
+
+
+
+a 
+
+P 
+
+7 
+
+K 
+
+A 
+
+r 
+
+P 
+
+0 
+
+O 
+
+a' 
+
+
+weighting function 
+
+conipression parameter in the MUSCL interpolation 
+
+density, kgfm^ 
+
+ratio of specific heats 
+
+MUSCL interpolation parameter 
+
+second coefficient of viscosity 
+
+shear stress, Pa 
+
+coefficient of viscosity, Pa.s 
+
+half-angle for the axisymmetric cells, radians 
+
+angular coordinate, radians 
+
+cell volume, np 
+
+volume per radian for the axisymmetric cell 
+
+
+< • > : cell-averaged value 
+
+YIabcd *a*b : •a*b-^ •b + *d*c + *0 •a 
+
+
+Superscripts 
+
+n : time level or iteration level 
+* : intermediate states for the Riemann solver 
+
+' : secondary cell identifier 
+
+
+Subscripts 
+
+
+A,B,C,D 
+
+hj 
+
+is 
+
+MIN 
+
+N,S,E,W 
+
+n 
+
+t 
+
+V 
+
+0 
+
+L,R 
+
+
+primary-cell vertices 
+
+cell-centre indices 
+
+species index 
+
+“vertical” interface 
+
+“horizontal” interface 
+
+minimum allowable value 
+
+North, South, East, West interface or boundary 
+
+normal to interface 
+
+tangent to interface 
+
+viscous contribution 
+
+cartesian components 
+
+2 = 0 or <? = 0 plane 
+
+left state, right state 
+
+
+4 
+
+
+
+
+
+
+
+
+
+
+
+1 Introduction 
+
+
+In recent years the proliferation of relatively fast computers has popularized the direct cal¬ 
+culation of viscous, compressible flows in a time-accurate manner. In some situations, such 
+as the transient hypersonic flow over a model in a shock-tunnel, numerical simulation is 
+the only way to extract detailed information about the flow field. Such computations are 
+very demanding and require computational resources that far exceed those available on a 
+single-processor computer. Hence, flow solvers running on parallel computers are of great 
+interest. 
+
+This report describes a cede (and set of routines) that integrate the Xavier-Stokes equa¬ 
+tions in a two-dimensional flow domain. Only a single block version of the code using a 
+“tensor product" (or structured) grid is considered here. The multiblock and parallel exten¬ 
+sions will be the subjects of future work. 
+
+The code is based on the standard cell-centred time-dependent finite-volume formulation 
+as described in [1] - (6). The governing equations are expressed in integral form over arbitrary 
+quadrilateral cells with the time rate of change of conserved quantities in each cell specified 
+as a summation of the fluxes through the cell interfaces. The fluxes are composed of separate 
+inviscid and viscous components. The inviscid components are computed with a Riemann 
+solver while the viscous fluxes are calculated by application of the divergence theorem. 
+
+Section 2 describes the governing equations and programming details for two-dimensional 
+geometries while the governing equations for axisymmetric geometries arc given in Appendix 
+A. A set of test cases, designed to exercise various features of the code, is then described in 
+Section 3. These test cases may be used to validate changes made to the code when porting 
+it to different computer architectures. 
+
+
+5 
+
+
+
+
+
+
+
+2 Governing Equations 
+
+
+The integral form of the two-dimensional Navier-Stokes equations in cartesiein coordinates 
+can be expressed as 
+
+
+§il lu ^ ~ ~ j^{G -G^) dx = J Q dx dy 
+
+
+where 
+
+
+U = 
+
+
+P 
+
+pu 
+pv 
+pE 
+
+Pfh J 
+
+
+is the algebraic vector of conserved quantities, 
+
+
+pu 
+
+
+pv 
+
+pu^ -h P 
+
+
+puv 
+
+pvu 
+
+, G = 
+
+pv"^ + P 
+
+pEu + Pu 
+
+
+pEv + Pv 
+
+pfis'i 
+
+
+pfis^ . 
+
+
+are the inviscid flux vectors, 
+
+
+0 
+
+
+0 
+
+Txx 
+
+
+Txy 
+
+
+II 
+
+Ch 
+
+Tyy 
+
+Txx« + Ty^V + qx 
+
+
+TxyU + TyyV + qy 
+
+pfis^x,is 
+
+
+
+
+( 1 ) 
+
+( 2 ) 
+
+
+(3) 
+
+
+(4) 
+
+
+are the viscous flux vectors and Q is an algebraic vector of source terms. S is the control 
+surface bounding the control volume fi. These equations specify the conservation of mass, 
+momentum, energy and the conservation of mass for the individual species in the control 
+volume. They are supplemented by the equation of state which relates the pressure to the 
+density and internal energy as 
+
+P = P(p.e) . (5) 
+
+For a calorically perfect gas, we use 
+
+
+P = /?( 7 -l)e , 
+
+
+( 6 ) 
+
+
+while, for air in chemical equilibrium, we use the curve fits in [7]. The viscous stresses are 
+given by 
+
+
+Txx 
+
+
+
+
+
+
+
+6 
+
+
+
+
+
+
+
+
+
+
+
+( 7 ) 
+
+
+
+where fi and A are the first and second coefficients of viscosity. The viscous heat flux is 
+
+
+= k dTfdx + hiJisVr^u , 
+
+qy = k dT/dy +pY^hiJisVy^ii . (8) 
+
+Currentljf, the code convects the species without considering their diffusion (i.e. 14,,-, = 
+Vy^ta = 0). For air, viscosity is evaluated using Sutherland’s law 
+
+
+
+
+= 1.458 X 10~® 
+
+
+tVt 
+
+r +110.4 ’ 
+
+
+(9) 
+
+
+where T is in degrees Kelvin and p. is in Pa.s. Also, Stokes’ hypothesis (of zero bulk viscosity) 
+is invoked to give A = — |/i and a constant Prandtl number {Pr = 0.72) is used to evaluate 
+the coefficient 
+
+
+Pr 
+
+
+( 10 ) 
+
+
+For two-dimensional flow without heat sources or chemistry, the source terms in Q are set 
+to zero. For axisymmetricflow, equations (1) - (4) and (7) are replaced by their axisymmetric 
+counterparts discussed in Appendix A. 
+
+
+2.1 Spatial Discretization and Data Storage 
+
+The governing equations (1) - (4) are applied to straight-edged quadrilateral cells as shown 
+in Fig. 1. Note that the bounding contour S consists of 4 line segments in the (z,y)-plane 
+and (for 2D geometry) the cell extends 1 unit in the ^-direction. A cell-centred discretization 
+is used in which cell-averaged values <U > are associated with the “primary” cell centres. 
+The vertices are labelled A — D and the line integrals in equation (1) (which are taken in 
+the usual counter-clockwise direction) are approximated using the midpoint rule Thus, the 
+semi-discrete equations can be expressed as 
+
++ h E (F-K){yB-yA)-^ E {g-g.){xb-:^a) -<«> , (11) 
+
+ABCD ABCD 
+
+where the summations are over the 4 sides of the cell. Given the current flow state and a 
+procedure for computing the average fluxes at the midpoints of the interfaces, equation (11) 
+may the integrated in time as an initial value problem. 
+
+
+7 
+
+
+
+
+
+
+
+
+
+The flow domain is divided i. ‘o a number of blocks with the data for each block stored 
+in a single data structure as defined in Appendix C. Currently, the flow domain consists of 
+a single block. The data structure (labelled A, say) includes both geometry and flow data 
+and flags for boundary conditions. 
+
+The structured grid is specified as a two-dimensional array of primary cells with i, j indices 
+ranging from imin to imaz and to j,r.az respectively. These cells are also called “active” 
+cells (as opposed to “ghost” cells which are used to implement boundary conditions). Using 
+the C language syntax, the density in cell is accessed as K.Cir[i]\j].rho. Here A.Ctr 
+is a pointer to an array of pointers, each of which points to a one-dimensional array. See 
+Fig. 2 for a schematic of the data storage. Nonzero values of imin and jmtn allow storage of 
+ghost cells without the use negative indices or index translation. For convenience, the cell 
+interfaces are labelled “North”, “South”, “East” and “West”. The domain boundaries are 
+labelled “North”, “South”, “East” and “West” also, and are adjacent to cells with j = jmax, 
+j = 3min~. i = imaz and i = imin respectivclv. 
+
+Referring to Fig. 1, the geometry of the cell i,j is defined by its vertices which are 
+specified as (x,y) coordinate pairs. The vertices A,B,C,D are indexed as A.Vtx[i][j — 1], 
+A.Vtx{i][j], A.Ftxfi - !][;], and A.Vtx[i — !][? - 1] respectively. The North and South 
+(“horizontal”) interfaces are indexed as A.Hr{i]\j] and A.HF\i]\j — 1} while the West and 
+East (“vertical”) interfaces are indexed as - !][;] and A.VF[i\\j] respectively. 
+
+The cell volume is computed (via an application of the divergence theorem) as 
+
+a = I xdy, (12) 
+
+where S{j is the bounding contour for the cell in the (x, ’')-plane. This expression is dis¬ 
+cretized as 
+
+- k i^B + XA){yB - Va) . (13) 
+
+“ ABCD 
+
+Note that unit depth has been assumed for the x-direction and the area of the cell in the 
+(x,y)-plane Aij = Cell averages of both the primary variables (p,u,v,e,p,T) and the 
+conserved variables {p,pu,pv,pE) are associated with the cell “centre” or “centroid”. The 
+coordinates of the cell centre given by 
+
+
+
+8 
+
+
+
+
+
+
+
+which are approximated as 
+
+XCtr = ^ H (XB + XAfiVB - Va) /Ai,j , 
+
+® ABCD 
+
+yctr = T Z! {yB + yA){xB-\-XA){gB-yA) /Aij , (15) 
+
+^ ABCD 
+
+after application of the divergence theorem. 
+
+An anav of “secondary” cells is also defined (see Fig. 3) using the primary cell centres as 
+the new vertices. These secondary cells are used in the calculation of the spatial derivatives 
+required by the viscous stresses (7). 
+
+2.2 Inviscid Flux Calculation 
+
+The purpose of the inviscid flux routme is to provide estimates for the components of F 
+and G in equation (3) at each cell interface for eadi time step. This is achieved by first 
+interpolating the flow state (consisting of a set of values for p, u, v, e, P, a) to either side 
+of each interface at the start of the time step and then applying a Riemann solver to estimate 
+the flow state at the interface during the time step. 
+
+2,2.1 Inviscid Boundary Conditions 
+
+Before interpolation, the inviscid boundary conditions are applied by setting up two layers 
+of ghost cells along each of the boundaries. For a supersonic inflow boundary, all of the 
+ghost-cell quantities are specified as fixed while, for a supersonic outflow boundary, the 
+ghost-cell quantities are extrapolated from active cells just inside the boundary. Solid-wall 
+(i.e. tauigency) boundary conditions are applied by setting all of the scalar quantities in 
+the ghost cells equal to those in the active cells adjacent to the boundary but setting the 
+ghost-cell velocities to the mirror image of those in the active cells. Note that, for no-slip 
+walls, we apply just the tangency condition at this stage of the calculation. 
+
+
+2.2.2 Interpolation of the Interface State 
+
+The state of the flow either side of each interface is interpolated (or reconstructed) from 
+the set of cell averaged states by assuming a variation of the variables within cells. This 
+interpolation is performed independently in each index direction and separately for each 
+
+
+9 
+
+
+
+
+
+
+
+
+primary variable. For example, the density either side of the vertical interface {i.j) is 
+obtained by a generalized MUSCL interpolation/reconstruction [8] using the expressions 
+
+PL = PiJ + ^ [(1 - + (1 + 5 
+
+PR = Pi>ij “ 4 ■*■(!“ ^)(^‘FX.i.ij] j (16) 
+
+where 
+
+= MINMOD{Aij, Mr-ij) : 
+
+= MINMODi0Aij, , (17) 
+
+and 
+
+^sj ~ Pij pt—lj - (1®) 
+
+Interpolation for the other variables and for the horizontal interfaces is done similarly. 
+
+S'" ting the parameter /c = 1/3 gives an upwind-biased third-order interpolation scheme 
+w’hile setting « = 1/2 gives second-order upwind interpolation. The “compression” parame¬ 
+ter [9] is restricted to 
+
+■ (19) 
+
+We have used ^ = 2 for the test cases reported in Section 3. The MINMOD limiter function 
+returns the argument with the minimum magnitude if both arguments have the same sign 
+and returns zero otherwise (see e.g. (lOj). To make the code more robust, we impose the 
+conditions p£,pn > Pm in and after interpolation, but before the application 
+
+of the Riemann solver. 
+
+.After the interpolation process, a Riemann solver is applied to compute the inviscid flux 
+vectors (3). Note that the solver is applied in a locallv rotated frame of leferem c in which 
+the w-velocity is normal to the interface and the increasing i or j index being on the right 
+side of the interlace. The transformation is 
+
+= -f U 71^-f l» Hy , 
+
+Vtenserd = -U Oy-f V 71 - , (20) 
+
+where n- and tiy are the x- and y-direction amines of the interface normal. 
+
+
+iO 
+
+
+
+
+
+
+
+
+
+t«Xli9K^iE»9EliJEHaer« 
+
+
+
+
+2.2.3 Riemann Solver 
+
+
+There are a number of Riemann solvers that can be used including “exact” iterative schemes 
+[11] and approximate (noniterative) sv-hemes [12] [13] [14]. The approximate schemes are 
+generally less computationally expensive that the iterative schemes and, because the Rie- 
+mann solver comsumes a large fraction of the total computational effort, an approximate 
+scheme is favoured. Although the Roe-type solver is popular because it is relatively fast, 
+there are situations (such as the double-Mach-reflection case discussed in Section 3.3) where 
+it occasionally produces spurious results (see [15,16,17]). On the other hand, the Osher-type 
+solver [13] is considered to be fairly robust and free of adjustable parameters [18]. 
+
+We have opted to use a 3-stage approximate solver in which the first stage computes the 
+intermediate pressure and velocity assuming isentropic wave interaction. A second stage, 
+based on the strong-shock relations, may be invoked to improve the first-stage estimate if 
+the pressure jumps across either wave are sufficiently large. In practice, this modification 
+has been required only in exir^me conditions such as those found in the bluff-body test case 
+(Section 3.7). The final stage is to select/interpolate the interface state (p, u, v, e, P, etc) 
+from the set of left, right and intermediate states. If stage 2 (strong shock modification) is 
+not invoked, the solver is much like Osher’s approximate Riemann solver [13]. 
+
+STAGE 1: The first stage of the Riemann solver assumes that a spatially constant left state 
+(subscript L) and right state (subscript R) interact through a pair of finite-amplitude (and 
+isentropic) compression or rarefaction waves. Perfect gas relations ([19] cited in [11]) are 
+used to obtain the intermediate states (i*, R*) in the gas after the passage of left-moving 
+and right-moving waves, respectively. The expressions implemented in the code are 
+
+
+PI = Pr = P^=Pl 
+
+
+{l-mL-Un) 
+
+
+-|- Z) 
+
+
+27/(7-!) 
+
+
+( 21 ) 
+
+
+and 
+
+
+
+
+where the Riemann invariants are 
+
+
+UlZaUr 
+1 + ^ 
+
+
+U L, = -H 
+Ur = Ur- 
+
+
+2aL 
+
+7-1 
+
+2aR 
+
+7-1 
+
+
+and 
+
+
+and the intermediate variable Z is given by 
+
+
+
+
+( 22 ) 
+
+
+(23) 
+
+
+( 24 ) 
+
+
+11 
+
+
+
+
+
+
+
+Note that these expressions involve the power operator which is computationally expensive. 
+For a limited range of base and exponent, the standard power function is replaced by the 
+approximate expansion given in Appendix B. In the exceptional situation of (Ui — Vr) < 0, 
+we assume that a (near) vacuum has formed at the cell interface and set all of the interface 
+quantities to minimum values. 
+
+STAGE 2: If the pressure jump across either wave is large (say, a factor of 10), then the 
+guess for the intermediate pressure is modified using the strong shock relations. 
+
+
+If P* > 10 Pl and P’ > 10 Pr then both waves are taken to be strong shock waves and 
+the intermediate pressure and velocity can be determined directly as 
+
+|2 
+
+, (25) 
+
+
+n. 7+1 
+
+P = -TT-PL 
+
+
+- ur) 
+
+i\/PRA-^JpL 
+
+
+and 
+
+
+, _ ^/pZ + y/PR Ur 
+\/PL 
+
+
+(26) 
+
+
+If P* is greater than Pl or Pr (but not both), the stage-1 estimate for P* can be improved 
+with two Newton-Raphson steps of the form 
+
+
+where 
+
+
+
+i« — p* ^ p (^ 
+n+l - j 
+
+Fn = ui{p:) - u*n{p:) , 
+
+
+Ur- 
+
+201. (El) 
+
+7-1 \Pl) 
+
+a=i 
+
+2l 
+
+) 
+
+P* < 10 Pl 
+
+ul - 
+
+( 2P* 'l 
+
+1/2 
+
+P* > 10 Pl 
+
+Vpz,(7+1)/ 
+
+> 
+
+Ur + 
+
+2oa. (EL') 
+7-1 \PrJ 
+
+
+
+27 
+
+) 
+
+P* < 10 Pr 
+
+wn + 
+
+(- 2^- 
+
+1/2 
+
+P* > 10 Pr 
+
+V/>r(7+1)J 
+
+1 ) 
+
+
+(27) 
+
+(28) 
+
+
+(29) 
+
+(30) 
+
+
+During the update, we ensure that P* > Pmin where Pmin is some small value. After 
+updating P*, the intermediate velocity is evaluated using the relevant strong-shock relation 
+from (29) or (30). 
+
+STAGE 3: Now that we have computed the pressure and velocity in the intermediate 
+regions behind the waves, the other intermediate flow properties may be evaluated. Then, 
+the interface conditions used in the inviscid flux vector (3) may be selected or interpolated 
+
+
+12 
+
+
+
+
+
+
+
+from the 4 flow states using the logic shown in Fig. 4. Note that, although only the left- 
+moving wave is discussed below, a similar procedure is used to obtain the flow state behind 
+the right-moving wave. 
+
+If the pressure rises across the left-moving wave (i.e, P* > Pjj), the left wave is assumed 
+to be a shock and density is obtained from the Rankine-Hugoniot relation as 
+
+
+Pl = PL 
+
+
+(7 -k 1)P* + (7 - 1)^L 
+(7-{- l)Pi, -b (7 - 1)P* 
+
+
+(31) 
+
+
+The specific internal energy is obtained from the equation of state as 
+
+P* 
+
+
+H = 
+
+
+(7 - l)^i ’ 
+
+
+(32) 
+
+
+and estimates for the local speed of sound (for later use in the interpolation of the interface 
+properties) are 
+
+< = 77(7-l)e2 . (33) 
+
+The velocity of the wave (relative to the initial left state) is given by 
+
+
+ui - wsi = 
+
+
+7-MPl fP* 7-1' 
+
+T 
+
+
+1/2 
+
+
+2 pL \Pl 7 + 1/J 
+
+where wsi, is the velocity of the wave relative to the cell boundaries. 
+
+
+(34) 
+
+
+If the pressure falls across the left-moving wave (i.e. P* < Pl), the isentropic-wave 
+relations are used to obtain the intermediate properties. The local speed of sound is obtained 
+from the Riemann invariant as 
+
+
+
+
+(35) 
+
+
+while the specific internal energy is obtained from the sound-speed relation as 
+
+(«l:^ 
+
+
+Ct = 
+
+
+(36) 
+
+
+(7 - 1)7 ' 
+
+The density is obtained from the equation of state as 
+
+The velocity of the leading-edge of the wave (relative to the initial left state) is given by 
+
+UL — wsl = flL • (38) 
+
+
+13 
+
+
+
+In the preceding perfect-gas equations an effective 7 may used to include variable gets 
+properties in an approximate manner. We evaluate this effective 7 as a density weighted 
+function [ 20 ] using 
+
+7 = Q;7£, + (1 - Qr)7/i, (39) 
+
+
+where 
+
+
+and 
+
+
+v/^+V^’ 
+
+
+(40) 
+
+
+7i 
+
+IR 
+
+
+
+PL^L 
+
+
+) 
+
+
+Pr 
+
+PR^R 
+
+
++ 1 . 
+
+
+(41) 
+
+
+2.3 Viscous Flux Calculation 
+
+After computing the inviscid flux vectors (3), we save the values of u, v and T at the 
+midpoints of the primary-cell interfaces for use in the calculation of the molecular transport 
+of momentum and energy across the interfaces. These values may be either those computed 
+by the Riemann solver or averages of the interpolated left- and right-states. 
+
+The spatial derivatives required in the viscous stress terms (7) are obtained by applying 
+the divergence theorem to each of the secondary cells. This gives an average value of the 
+derivative which is then assigned to the primary-cell vertex at the “centre” of the secondary 
+cell. Thus, for the spatial derivatives of temperature at vertex i, j, we compute 
+
+
+
+9 X) (Pa' + TBi){yB' — VA') / Aa'B'C'D' j 
+^ A'B'C'D' 
+
+
+IT {Pa' + Pbi){^b' - xa') / 
+
+^ A'B'C'D' 
+
+
+^A'B'C'D' 
+
+
+(42) 
+
+
+where 
+
+\ 
+
+Aa'B'C'D' =9 i^A' + XBi){yB' - yA') 5 (43) 
+
+^ A'B'C'D' 
+
+and A', B', C and D' are the primary-cell centres surrounding the vertex. Spatial derivatives 
+of the u- and u-velocity components are calculated similarly. The viscous fluxes (4) at the 
+interface midpoints are then computed using averages of the viscous stresses at the nearby 
+cell vertices. 
+
+
+14 
+
+
+
+
+
+
+2.3.1 Viscous Boundary Conditions 
+
+For the velocity field, application of the “no-slip” boundary condition is sinaply a matter of 
+setting both of the components to zero at the boundary interfaces. The temperature can be 
+set to a specified value for a fixed-T wall or it can be set equal to the ^^alue at the adjacent 
+cell centre for an adiabatic wall. For supersonic inflow, supersonic outflow, or a tangency 
+boundary, we leave the values as computed by the inviscid flux routine. 
+
+Note that, along the boundaries, the secondary cells are constructed using the two ad¬ 
+jacent primary-cell centrss and two interface points. The arrangement for each boundary is 
+showm in Fig. 5. 
+
+
+2.4 Time Stepping 
+
+
+= At 
+
+
+The conserved quantities are advanced from time level n to time level n-1-1 with the predictor- 
+corrector scheme 
+
+AC/« = ^ , 
+
+at 
+
+t/(i) = , 
+
+AC/(^) = At ^ . 
+
+at 
+
+^ C/(1)-f i (a1/(2) _ ^ (44) 
+
+tit 
+
+where the superscripts (1) and (2) indicate intermediate results and the temporal derivative 
+(^) is obtained from equation (11). If a first-order scheme is desired, only the first stage is 
+used and A.lthough first-order time-stepping requires fewer operations than 
+
+second-order time-stepping, it is also less robust. 
+
+To maintain stability, the time step is restricted to 
+
+
+At < AtaiM - CFL Q + + 
+
+
+where Ataiiowed is the smallest value for all cells and 
+
+CFL<- --r . (46) 
+
+5 — «-f P{1 -1- k) 
+
+is the specified Courant-Friedrichs-Lewy number. Note that restriction (46) is applicable 
+to the schemes developed by Chakravarthy [9] whereas the present procedure seems to be 
+stable for slightly higher values of CFL in some situations. For each cell, the inviscid signal 
+frequencies along the North and East interfaces are approximated as 
+
+1 _ |^iV,tongcn<i d" ® _j 1 _ l^iJ.fongcntl d" ® tA'v's 
+
+Aii:i~ Li, ’ AtE~ Le ' ^ ^ 
+
+
+15 
+
+
+
+
+
+
+while the viscous limit [21] is approximated as 
+
+1 
+
+^tviscous 
+
+2.5 Computational Effort 
+
+Currently, the code has not been optimized (although the flux calculation routines do vec¬ 
+torize with the default optimization offered by the Cray Standard-C Compiler). On a single 
+processor of a Cray Y-MP, the calculation takes approximately 30 — 35 /is/cell/predictor- 
+corrector step for an inviscid calculation and approximately 40 /is/cell/predictor-corrector 
+step for a viscous calculation. On a SUN Sparc-2 workstation, the calculation takes approx¬ 
+imately 1 ms/cell/predictor-corrector step for a viscous calculation. If only the forward time 
+step is used, these times are halved. 
+
+
+
+( 48 ) 
+
+
+16 
+
+
+
+
+
+
+
+3 Test Cases 
+
+
+3.1 One-dimensional Shock Tube 
+
+The first test case is the so-called one-dimensional shock tube problem used by Sod [ 22 ]. 
+The domain consists of a mesh of 100 x 2 cells over the rectangular domain 0 < a: < 1.0m, 
+0 < y < 0 . 1 m. Reflecting (i.e. tangency) conditions are applied along all domain boundaries 
+and viscous effects are omitted. The gas is calorically perfect with 7 = 1.4. For x < 0.5m, 
+the initial state is 
+
+p = 1.0 kgfm^, P = 10® Pa, u = v = 0, e = 2.5 x 10® Jfkg/K, 
+while, for x > 0 . 5 m, it is 
+
+p = 0.125 kg/m^, P = 10“* Pa, u = v = 0, e = 2.0 x 10® JjkgJK. 
+
+At i = 0, the hypothetical diaphragm (separating the two initial states) is removed and 
+the inviscid equations are integrated in time to < ~ 0.603 x 10“^s with CFL cx 0.5. MUSCL 
+interpolation with « = 1/3 is used. The resulting flow state for a single row of cells in 
+the x-direction is shown in Fig. 6 . Comparison with the exact i-olution (see e.g. [4]) is 
+reasonably good. The shock is captured in three cells and has the .orrect speed. However, 
+the contact discontinuity is fairly diffuse and the extreme edge of the expansion fan shows 
+some smearing. There is also a small glitch at the base of the rarefaction (x ~ 0 . 5 m) as 
+seen in [9] (Secion 2.6) and [18]. Setting CFL = 0.01 produced no discernible change in the 
+plotted solution. The contact discontinuity and shock were spread over the same number of 
+cells and the small glitch was still evident at the base of the rarefaction. 
+
+Of the test cases discussed here, this test case is simplest and requires the least memory 
+and processing time. On a Sparc -2 workstation, the total 7 mcessing time is approximately 
+27 seconds for 99 time steps (1.4 ms/cell/predictor-corrector time }. that this is 
+an overall time and includes file I/O and initialization of the geometij uata. 
+
+3.2 High-Temperature Shock Tube 
+
+This ccise is similar to Sod’s shock tube problem but is more demanding as it has pressure 
+and temperature jumps that are large enough for thermodynamic and chemical effects to be 
+significant. 
+
+
+17 
+
+
+
+
+
+
+
+The flow domain covers 0 < a: < 1.0m, 0 < t/ < 0.1m and is divided into a mesh of 
+200 X 2 rectangular cells. The initial flow state is the same as that used by Grossman and 
+Walters [23]. For x < 0.5m, we set 
+
+p = 2.641 kg/m^, P = 10.09 x 10® Pa, w = u = 0, e = 21.82 x 10® J/kg/K, 
+while, for x > 0.5m, we set 
+
+p = 1.174 kglm^, P = 0.1006 x 10® Pa, u = v = \., ^ : ,2.43 x 10® JjkgjK. 
+
+The gas is now assumed to be air in chemical equilibrium W'..h the pressure, temperature 
+and local scund speed specified as curve fits on density and 3 ual energy [7]. 
+
+Again, the hypothetical diaphragm is removed at •* = 0 md the governing equations 
+are integrated forward in time with CFL = 0.5 and /c = 1/3. Figure 7 shows the flow 
+state at 7 = 0.125 x 10“®s. Although an exact solution was not included in this figure, the 
+finite-volume 'olution appears to be in reasonable agreement with the result.? published in 
+[23]. This agreement indicates that the use of an effective q to approximate variable gas 
+properties in the Riemann solver is a reasonable approach for this type of problem. 
+
+0»' a Sparc -2 workstation, this case requires approximately 250 seconds of cpu >„me for 
+time steps (3.2 ms/cell/predictor-corrector time step). 
+
+3.3 Double Mach Reflection 
+
+To test the code’s ability to capture multidimensional dicontinuities, we examine the double 
+Mach reflection case 10 from GIaz, et al [24]. 
+
+Figure 8 shows the flow domain which is divided into 200 x 100 cells. These cells are 
+equally spaced in the x-direction and their vertical interfaces are aligned with the y-axis. 
+For each x-station, the cells are equally spaced in the y-direction. 
+
+The gas is a calorically perfect gas with 7 = 1.4 and has initial conditions of 
+p = 6.82 x 10"^ kgfnP, P = 6.0 x 10" Pa, w = u = 0, 
+e = 2.183 X 10® JlkgIK, 
+
+throughout the domain. At t = 0, a constant supersonic inflow with 
+
+p = 0.3028 kglrrP, P = 95.88 x 10® Pa, u - 1006m/s, v = 0, 
+e = 7.913 X 10® 'llkgIK, M = 1.51, 
+
+
+18 
+
+
+
+
+
+
+
+
+
+is applied to the West (x = 0) boundary. Tangency conditions are applied along the North 
+(y = 1.0m) and South boundaries and "ero-order extrapolation is used at the East (x = 1.0m) 
+boundary. The governing equations for inviscid flow are integrated forward in time with 
+CFL = 0.5 and K= l/o. 
+
+Initi?*’a planar shock is establi.hed and propagated into the flow domain with a shock 
+Mach number of 3.72. On encountering the ramp, this “primary” shock is reflected and a 
+(nearly) self-similar flow is established. Figure 9 shows the density contours at two times afte’ 
+the shock has encountered the ramp. The main features of the flow are the ( 1 ) primary shock 
+(still travelling from left '.o right), ( 2 ) a detache! (curved) shock forming over th^' leading 
+edge of the ramp, (3) a Mach stem from the primary shock to the ramp, (4) ano. jr Mach 
+stem from the primary shock to the detached shock, and (5) a pair shear layers pr* pagatiag 
+from the the intersections of the shocks. At later times, the detached shock continues to 
+propagate upstream and the flow fleld becomes subsonic. Figure 10 shows a comparison of 
+the present solution at t = O.Tms and an interferogram from [24]. Agreement is reasonable 
+given the uncertainty in the physical gas properties and the grid resolution used in the 
+calculation. Note that there is no ev'dence of a distorted Mach stem near the wall as seen 
+in some calculations made with the Roe-type approximate Riemann solver [15, 16, 17). 
+
+3.4 Flat Plate Boundary Layer 
+
+The implementation of the two-dimensional viscous terms v\ds validated by computing 2 
+cases of a supersonic, laminar boundary layer over a flat plate. 
+
+The flow geometry (for both cases) consists of a flat plate, 1 . 0 m long, aligned with a 
+uniform Mach 2 flow. T’.e gas is considered calorically perfect with 7 = 1.4, i? = 287 Jjkg/K 
+and a constant Prandtl ..umber of 0.72. The computational domain, as shown in Fig. 11 , 
+is shaped to include the eading-edge interaction shock (LEIS). The domain is divided into 
+N X N cells which are clustered toward the plate suifjc. and toward the inflow boundary 
+using one of Robert’s stretching transformations [25] (see also Section 5-6.1 in [26]). 
+
+For case 1 , we set N = 100 and apply supersonic free-stream conditions of 
+p = 0.0404 kg/rrF, u =■■ 597.3 m/s, v = 0, e = 1.592 x 10® J/kg, 
+to the West and North boundaries. These conditions correspond to 
+
+M = 2.0, i?e£, = i.65 X 10®, T = 222 K, 
+
+as used in [27]. The South boundary is set to be a no-slip wall with a fixed temperature 
+Twall = 222K while the East boundary conditions are obtained by zero-order (or constant) 
+
+
+
+
+
+
+
+
+
+extrapolation. Initially, the flow throughout the domain is set at free-stream conditions and 
+the governing equations are integrated forward in time using first-order (Euler) time-stepping 
+with CFL = 0.8 and k = 1/3. Figure 12 shows the pressure field at <. = 7.0ms. The only 
+apparent feature is the weak shock propagating into the flow from the leading edge of the 
+plate. However, a boundary layer develops along the plate and attains a total thickness of 
+approximately 0.005m by the end of the plate. Figure 13 compares the temperature and 
+T-velocity profiles at x = 0.941m with profiles computed by a spectrally-accurate boundary 
+layer code [28]. The shear stress estimates agree to within 3% at this time and the flow is 
+still approaching steady state (slowly). For this x-station, the first cell-centre off the wall 
+has ~ 5 where _ 
+
+^ ypw\jTvjl Pw f ^ 
+
+pw 
+
+Case 2 has the same flow geometry but hais 
+
+N = 50, p = 0.00404 kg/m^, Rec = 1.65 x 10®. 
+
+All other parameters are the same as case 1. Figure 14 shows the cell-centre mesh and 
+the pressure field at t = 8.0ms. The LEIS is now much stronger and the boundary layer, 
+which scales with y/Re, is approximately 3 times thicker. Fig. 15 sL.*ws the boundary 
+layer profiles at x = 0.916m where the displacement thickness is 5.10m/«2. Again, there is 
+reasonable agreement with the spectrally accurate boundary layer solution. This indicates 
+that me weak leading-edge shock influences the boundary layer very little. The processing 
+time required for this case is approximately 1.6 hours on a single processor of a Cray Y-MP 
+for approximately 116000 time steps (20 /is/cell/Euler time step). 
+
+3.5 Inviscid Flow over a Cone 
+
+Inviscid flow over cone is used to test the axisymmetric formulation of Appendix A. In the 
+steady-state limit, the shock (and other constant property lines) are straight and there is an 
+“exact” solution [29] (see also Ch. 10, [30]). Figure 16 shows the flow geometry for a 20® 
+half-angle cci.c whose axis of symmetry is along the x-axis. The flow domain is divided into 
+a mesh of 100 x 100 cells. The cells are equally spaced in the x-direction and their vertical 
+interfaces are aligned w.th the y-axis. For each x-station, the cells are equally spaced in the 
+^-direction. 
+
+Although we are interested in the ipiality of the steady-state solution for this test, we 
+simulate the flow using the same initial and inflow conditions as the double Mach reflection 
+
+
+20 
+
+
+
+
+
+
+
+
+case (Section 3.3). The gas is a calorically perfect with 7 = 1.4 and initial conditions 
+throughout the domain are 
+
+p = 6.82 X 10“^ kgfm^, P = 6.0 x 10^ Pa, u = v = 0, 
+
+e = 2.183 X 10® J/kg/K . 
+
+At t = 0, a constant supersonic inflow with 
+
+p = 0.3028 kgfm^, P = 95.88 x 10® Pa, u = 1006m/s, v = 0, 
+e = 7.913 X 10® J/kg/K, M = 1.51, 
+
+is applied to the West boundary. Tangency conditions are applied along the North and 
+South boundarie., and zero-order extrapolation is used at the Ecist boundary. The governing 
+equations for inviscid flow are integrated forward in time with CFL = 0.5 and high-order 
+MUSCL interpolation. 
+
+Figure 17 shows the density field at two instants after t = 0. By t = 1.0ms, the primary 
+(normal) shock has left the flow domain and conical flow is being established over the nose of 
+the cone. Figure 18 shows both the pressure and density fields (at t = 5.0ms) when the flow 
+has nearly reached steady state. Except for small deviations, the contours are straight lines 
+aligned with the (conical) generators propagating from the cone vertex. The shock angle 
+closely matches the value of 49® taken from Chart 5 in [31]. Note that, for an equivalent 
+two-dimensional situation, there is no “attached-shock” solution. 
+
+On a Sparc -2 workstation, this case requires 5.36 hours cpu time to take 2410 time steps 
+( 0.8 ms/cell/predictor-corrector time step). 
+
+3.6 Viscous Flow along a Cylinder 
+
+The implementation of the axisymmetric viscous terms is examined by computing the su¬ 
+personic, laminar boundary layer along a hollow cylinder. Except for the axisymmetric 
+geometry, this ccise is similar to case 2 of the flat-plate boundary layer in Section 3.4. 
+
+The flow geometry consists of a hollow cylinder aligned with the x axis. The cylinder 
+is 1 . 0 m long and has a 0.005m radius. The free stream is a uniform supersonic flow with 
+M = 2. The gas is considered calorically perfect with 7 = 1.4, R = 2S7J/kg/K and 
+a constant Prandtl number of 0.72. The computational domain, as shown in Fig. 19, is 
+shaped to include the leading-edge interaction shock (LEIS) and is divided into 50 x 50 cells 
+(as done for the flat-plate boundary layer). 
+
+
+21 
+
+
+
+
+
+
+We apply supersonic free-stream conditions of 
+
+p = 0.00404 u = 597.3 m/s, v = 0, e = 1.592 x 10^ J/fcp, 
+
+M = 2.0, iZei, = 1.65 X 10®, T = 222 K, 
+
+to the West and North boundaries. The South boundary is set to be a no-slip wall with 
+a fixed temperature T^aii — 222K while the East boundary conditions are obtained by 
+zero-order (or constant) extrapolation. Initially, the flow throughout the domain is set at 
+free-stream conditions and the governing equations are integrated forward in time using first- 
+order (Euier) time-stepping with CFL = 0.8 and higb-oraej MUSCL interpolation. Figure 
+
+20 shows the pressure field at t = 8.0ms. Compared to the two-dimensional situation, the 
+LEiS is much weaker and the boundary layer at the end of the cylinder is thinner. Figure 
+
+21 compares the temperature and x-velocity profiles at x = 0.916m for both a 50 x 50 grid 
+and a 70 X 70 grid with profiles computed by a spectrally-accurate boundary layer code 
+[28]. Here, the displacement thickness is 4.22mm which is approximately 20% less than the 
+corresponding value on the flat plate. Although agreement is generally good for both grids, 
+there is noticeable im.provement in the temperature profile for finer grid. 
+
+
+3.7 High Mach Number FIoy/ around a Sphere. 
+
+The robustness of the code is demonstrated by computing a Mach 12 flow over a sphere. 
+This case is difficult because the shock in front of the sphere is very strong and because there 
+is a geometric singularity along the stagnation line. 
+
+Figure 22 shows the flow geometry and the GO x 60 mesh of cell centres. The South 
+boundary is the y = 0 symmetry line (and stagnation line) while the East boundary is the 
+surface of the sphere. .A tangency condition is applied al this surface. For case 1, free-stream 
+conditions of 
+
+
+p = 0.5097 kglm^, P = 42717 Pa, e = 2.095 x 10^ J/kg, 
+
+U = 4120.6(1 —exp (—5 X 10“®f)) m/s, U = 0, A/nominaf = 12, 
+
+are *pplied to the West boundary. Flow conditions at the North boundary are obtained by 
+zero-order (constant) extrapolation. The shape of the West boundary is derived from the 
+shock position correlations in [32]. Initial conditions throughout the domain are set to 
+
+p = 0.5097 kglrrP, P = 42717 Pa, e = 2.095 x 10® JJkg, tt = 0, v = 0, 
+
+
+22 
+
+
+
+
+The inviscid equations are then integrated forward in time using first order interpolation, 
+Euler time-stepping and CFL — 0.5. Figure 23 shows the flow field (density contours) 
+at an early time and again after the flow has approached steady state. The sf >ck wave 
+moves off the body and approaches its steady-state position in a well behaved manner. For 
+this case, a finite-difference scheme using Roe-type flux-difference splitting required a rather 
+large value for its entropy-fix parameter in order to obtain a physically reasonable solution 
+(J. White, NASA Langley Research Centre, private communication). Although the shock 
+shape is well behaved for the present code, there are significant small scale disturbances just 
+behind the shock, in the subsonic region. These disturbances appear to caused by small 
+perturbations to the shock position and have the scale of the local mesh spacing. Discrete 
+points from experimentally derived correlations {-32] are plotted on the later-time solution. 
+On the whole, agreement is good. The largest deviations are near the outflow boundary 
+where the flow field may be still developing. 
+
+Two other calculations are included to show the effect of viscosity on the small-scale 
+disturbances in the subsonic region. To make the viscous effects larger, the free-stream 
+density and pressure are lowered to 
+
+
+p = 0.5097 X 10“^ kglm^, P — 427.iPa . 
+
+The governing equations are integrated in time with the viscous terms included but the East 
+boundary condition is still a tangency condition. For case 2, the first-order interpolatl, n 
+is used and the result is shown in Fig. 24(a). The extra dissipation has damped the dis¬ 
+turbances in the subsonic region. Iligh-ordcr MUSCL interpolation is used for case 3 and 
+as shown in Fig. 24(b), the result is essentially the same except for some slightly noisier 
+contours away from the axis. Profiles of density and pressur-- along the line of cells adjacent 
+to the x-axis are shown in Fig. 25. The shock appears to be captured in 2 or 3 cells with 
+no o.scillation and the density Jump is close to the ideal strong-shock value of 6 (see c.g. (33] 
+Section 2.2). The pressure ratio from free-stream to the stagnation point is 1S5.S which is 
+very close to the ideal value of 185.9 for M = 12 (sec e.g. [30] Table A.2). 
+
+
+so 
+
+
+
+
+
+
+4 Concluding Remarks 
+
+
+This report has described a program for the time-integration of the Navier-Stokes equations 
+on a t\vo-(Mmensional structured mesh. The program is based on a cell-centred, finite-volume 
+formulation and uses a three stage Riemann solver to compute the inviscid flux(^. Viscous 
+fluxes are computed by applying the divergence theorem to the flow data on a set of secondary 
+cells. Grid metrics are not required. Time stepping is performed with either an Euler or a 
+predictor-corrector scheme. 
+
+Currently, the program is restricted to a single-block, structured grid. However, the code 
+modules are written so that they may be applied to any number of such blocks. All that 
+is required is the addition of a set of routines to exchange boundary data and a modified 
+time-stepping procedure. This extension and the addition of chemical source terms will be 
+the subject of future work. 
+
+
+Acknowledgements 
+
+Thanks to Jeff Scroggs (North Carolina State University), Dean Eklund, John Korte, Joe 
+Morrison, David Pruett and Jeff White (NAS.4 Langley Research Centre) for many useful 
+discussions and suggestions. 
+
+
+24 
+
+
+
+References 
+
+[1] R. C. Swanson and E. Turkel. A multistage time-stepping scheme for the Navier-Stokes 
+equations. ICASE Report 84-62, 1990. 
+
+[2] A. Arnone and R. C. Swanson. A Navier-Stokes solver for ceiscade flows. ICASE Report 
+88-32, 1988. 
+
+[3] C. Hirsch. Numerical Computation of Internal and External Flows. Volume 1: Funda¬ 
+mentals of Numerical Discretization. John Wiley & Sons, 1988. 
+
+[4] C. Hirsch. Numerical Computation of Internal and External Flows. Volume 2: Compu¬ 
+tational Methods for Inviscid and Viscous Flows. John Wiley & Sons, 1990. 
+
+[5] R. W. Walters, D. C. Slack, P. Cinnella, M. Applebaum, and C. Frost. A user’s guide 
+to GASP. Technical report, Virginia Polytechnic Institute and State University, 1990. 
+
+[6] M. Vinokur. An analysis of finite-difference and finite-volume foundations of conserva¬ 
+tion laws. Journal of Computational Physics, 81(l):l-52, 1989. 
+
+[7] S. Srinivasan and J. C. Tannehill. Simplified curve fits for the transport properties of 
+equilibrium air. NASA Contractor Report 178411, Iowa State University, 1987. 
+
+[8] W. K. Anderson, J. L. Thomas, and B. van Leer. A comparison of finite volume flux 
+vector splittings for the Ei ler equations. AIAA Paper 85-0122, 1985. 
+
+[9] S. R. Chakravarthy. Development of upwind schemes for the Euler equations. NASA 
+Contractor Report 4043, 1987. 
+
+[10] P. K. Sweby. High resolution schemes using flux limiters for hyperbolic conservation 
+laws. SIAM J. Numer. Anal, 21:995-1010, 1984. 
+
+[11] J. J. Gottlieb and C. P. T. Groth. Assessment of Riemann solvers for unsteady one¬ 
+dimensional inviscid flows of perfect gas. Journal of Computational Physics, 78(2):437- 
+458, 1988. 
+
+[12] P. L. Roe. Approximate Riemann solvers, parameter vectors, and difference schemes. 
+Journal of Computational Physics, 43:357-372, 1981. 
+
+[13] S. Osher and F. Solomon. Upwind difference schemes for hyperbolic systems of conser¬ 
+vation laws. Mathematics of Computation, 38(158):339-374, 1982. 
+
+
+25 
+
+
+
+
+
+
+
+
+
+[14] J. K. Dukowicz. A general, non-iterative Riemann solver for Godunov’s method. Journal 
+of Computational Physics^ 61(1):119-137, 1^'’5. 
+
+[15] J. Casper. Finite-volume application of hi^jU-order ENO schemes to two-dimensional 
+boundary-value problems. AIAA Paper 91-0631, 1991. 
+
+[16] J. J. Quirk. An adaptive grid algorithm for computational shock hydrodjmamics. Ph.D. 
+Thesis, Cranlield Institute of Technology, 1991. 
+
+[17] I). F. Hawken and J. J. Gottlieb. Prediction of two-dimensional time-dependent gasdy- 
+namic flows for hypersonic studies. UTIAS Report 335, 1990. 
+
+[18] R. Abgrall, L. Fezoui, and J. Talandier. An extension of Osher’s Riemann solver for 
+chemical and vibrational nonequilibrium gas flows. Int. J. for Numerical Methods in 
+Fluids, Submitted, 1991. 
+
+[19] S. K. Godunov (Ed). Numerical Solution of Multidimensional Problems in Gasdynamics. 
+Nauka, Moscow, 1976. 
+
+[20] T. A. Edwards. The effect of exhaust plume/ afterbody interaction on installed scramjet 
+performance. NASA Technical Memorandum 101033, 1988. 
+
+[21] R. C. Swanson, E. Turkel, and J. A. White. An effective multigrid method for high-speed 
+flows. In Fifth Copper Mountain Conference on Multigrid Methods, 1991. 
+
+[22] G. A. Sod. A survey of several finite difference methods for systems of nonlinear hyper¬ 
+bolic conservation laws. Journal of Computational Physics, 27(1):1-31, 1978. 
+
+[23] B. Grossman and R. W. Walters. Analysis of flux-split algorithms for Euler’s equations 
+with real gases. A.I.A.A. Journal, 27(5):524-531, 1989. 
+
+[24] H. M. Glaz, P. Colella, I. I. Glass, and R. L. Deschambault. A detailed numerical, 
+graphical, and experimental study of oblique shock wave reflections. UTIAS Report 
+285, University of Toronto, 1986. 
+
+[2.5] G. 0. Roberts. Computational meshes for boundary layer problems. In Lecture Notes 
+in Physics, 8, pages 171-177. Springer-Verlag, 1971. 
+
+[26] D. A. Anderson, J. C. Tannehill, and R. H. Fletcher. Computational Fluid Mechanics 
+and Heat Transfer. Plemisphere, New York, 1984. 
+
+[27] J. J. Korte. An explicit, upwind algorithm for solving the parabolized Navier-Stokes 
+equations. Ph. d. dissertation. North Carolina State University, 1989. 
+
+
+26 
+
+
+
+
+
+
+
+
+[28] C. D. Pruett and C. L. Street. A spectral collocation method for compressible, nonsim¬ 
+ilar boundary layers. Int. J. Num. Meth. Fluids, Accepted for publication, 1991. 
+
+[29] G. I. Taylor and J. W. Maccoll. The air pressure on a cone moving at high speed. Proc. 
+Roy. Soc. (London) Ser. A, 139:278-311, 1933. 
+
+[30] J. D. Anderson. Modern Compressible Flow: with Historical Perspective. McGraw-Hill, 
+New York, 1982. 
+
+[31] Ames Research Staff. Equations, tables and charts for compressible flow. NACA Report 
+1135, 1953. 
+
+[32] F. S. Billig. Shock-wave shapes around spherical- and cylindrical-nosed bodies. J. 
+Spacecraft and Rockets, 4(5):882-883, 1967. 
+
+[33] J. D. Anderson. Hypersonic and High Temperature Gas Dynamics. McGraw-Hill, New 
+York, 1989. 
+
+[34] D. R. 1 ’dund. Numerical modeling of supersonic turbulent reacting free shear layers. 
+Ph.D. Thesis, North Carolina State University, Department of Mechanical Engineering, 
+1989. 
+
+
+27 
+
+
+
+
+
+
+
+A Axisymmetric Flow Geometry 
+
+We now consider an axisymmetric flow with velocity 
+
+u = u Bx + v ey-]rw , 
+
+u = UQ{x,r) , 
+
+V = VQ{x,r) cos 6 , 
+
+w = vo{x,r) sin0 . 
+
+
+( 50 ) 
+
+
+Here r = yo and 0 are the polar coordinates in the {y, 5:)-plane as shown in Fig. 26. The 
+subscript 0 refers to the ^ = 0 (or the z = 0) plane. All other primary variables (i.e. P, T, 
+e, fis) are functions of x and r only. Derivatives are related by 
+
+A = A 
+
+dx dx ’ 
+dy 
+
+d _ , cosO d . . „ d 
+
+dz 
+
+
+sinO d 
+
+-+ cos 
+
+r aO or 
+
+
+
+
+(61) 
+
+
+Following the approach of Vinokur [6], we introduce an axisymmetric cell of extent 2^^ 
+radians in the (y, z)-plane. Figure 27 which shows an segment of an axi-symmetric volume 
+element with the axis of symmetry aligned with the x-axis. Note the “Front” and “Back” 
+interfaces at angles 0 = and 0 = —^ respectively. These interfaces have unit normals 
+given by 
+
+no=+^ = sin ^ Cy + cos V’ , 
+
+no=-4i = —sinip By — cos^ . (52) 
+
+Due to the axial-symmetry of the flow field, there is zero normal velocity at these planes. 
+The cell volume is now 
+
+n = 2^ / yx dy ^ (53) 
+
+JSo 
+
+where is the contour of the cell in the (x,y)-plane. Also, we define the modified cell 
+volume (or volume per radian) to be 
+
+
+2 ^ 
+
+
+In the code, equation (54) is approximated by 
+
+
+(54) 
+
+
+(55) 
+
+
+ABCD 
+
+
+28 
+
+
+
+
+
+
+
+
+A.l Governing Equations in Cartesian Coordinates 
+
+
+We now consider the cartesian form of the Navier-Stokes equations in three dimensions and 
+then substitute the axisymmetric expressions into each of the terms. The z-momentum 
+equation will then be dropped from the set and replaced with the approximation that the 
+pressure at the Front and Back interfaces is the same as that at the cell centre. The goal is 
+to reduce the full three-dimensional system to a system of quasi-two-dimensional equations 
+which can be used in place of equations (1) - (4), (7) in Section 2. 
+
+
+The governing equations can be expressed as 
+
+
+^ / Udxdydz + [ [{F- F^) 4 + (G - ey + {H - H,) e,\-ndS = [ Q dx dy 
+Ot JQ Js . 
+
+(56) 
+
+
+where 
+
+
+U = 
+
+
+P 
+
+pu 
+pv 
+pw 
+
+pE 
+
+L pfh J 
+
+
+F = 
+
+
+pu 
+
+
+pv 
+
+
+ou^ -b P 
+
+
+puv 
+
+
+pw. 
+
+. G = 
+
+pv^ + P 
+
+, H = 
+
+pwu 
+
+
+pwo 
+
+
+pEu -b Pu 
+
+
+pEv -b Pv 
+
+
+. PfisU 
+
+
+. pfisV . 
+
+
+
+pw 
+
+puw 
+
+pvw 
+
+pw^ -b P 
+pEw -b Pw 
+
+pfisW 
+
+
+
+0 
+
+
+
+
+0 
+
+
+Xxx 
+
+
+
+
+Txy 
+
+F = 
+
+^ V 
+
+
+
+II 
+
+
+'^yy 
+
+
+' zx 
+
+
+
+
+
+
+“1" "f" Tzx'^ “1“ Qx 
+
+
+TxyU + TyyV -b TzyW -j- Qy 
+
+
+pfis Vx^is 
+
+. 
+
+
+L 
+
+PfisVyjis 
+
+
+■ 
+
+0 
+
+- 
+
+
+
+
+r-z 
+
+
+
+II 
+
+
+V 
+
+
+
+
+
+'^Z.Z 
+
+
+
+
+T 
+
+xzU + TyzV + Z 
+
+tzW + (Iz 
+
+
+
+
+pfis 14 , is 
+
+
+
+
+(57) 
+
+
+(58) 
+
+
+(59) 
+
+
+( 60 ) 
+
+
+The individual viscous stress terms are 
+
+
+^ du . f du dv dw \ 
+
+= -b A I — -1- -r—b TT" 1 
+
+dx \dx dy c)x j 
+
+
+29 
+
+
+
+
+
+
+n dv . (du dv dw^ 
+
+r„ - 
+
+^ dw ^ f du dv dw 
+
+T.. = 2;,^ + A(^gj + -+- 
+
+/ du dv\ 
+
+Txy - Ty^ - . 
+
+(du dw\ 
+
+r„ = T„ = /‘(fe+fej . 
+
+/ dv dw\ 
+
+’■»« = -- = ■ 
+
+
+and the heat-flux terms are 
+
+
+
+,dT 
+
+Qx - 
+
+^dx ’ 
+
+
+,dT 
+
+Qy = 
+
+dy ’ 
+
+
+,dT 
+
+(Iz = 
+
+-^Tz ■ 
+
+
+Currently, we set the diffusion velocities to zero. 
+
+
+A.2 Application to the Axisymmetric Cell 
+
+We now substitute the axisymmetric expressions into the cartesian equations (56) - (62). 
+The algebraic vectors U, F, G and H are now 
+
+Po 
+
+PoUo 
+
+U = Po^ocosO 
+
+PoUosmt^ ' ' 
+
+PoEo 
+
+. Pofisfl . 
+
+
+Polio 
+
+PoUq -f- Po 
+PoVo cos 6 uo 
+PqVq sin 0 uq 
+PoEqUo PqUq 
+PofisoiiO 
+
+
+H = 
+
+
+PoVo 
+
+PqUqVo cos 0 
+
+g _ poVo cos^ <? + Po 
+
+’ PoVo sin 0 vo cos 0 
+
+PoEqVo cos 0 -1- PoUo cos 0 
+L pofisfiVo cos 0 
+
+PoVo sin 9 
+PoiioVo sin 0 
+PoVo cos 0 Vo sin 0 
+PoVq sin^ 0 + Po 
+PoEqVq sin 0 -b Po'Uo sin 0 
+pofisfiVo sin 0 
+
+
+30 
+
+
+
+
+
+
+Taking 0 « I and dropping some of the high-order terms in the viscous-stress expressions 
+
+
+gives 
+
+
+n duo (duo , dvo , uo 
+
+Txx = 2/i-^^ 1- A -Q — I- —1 - 
+
+dx \dx dr r 
+
+^ dvo (duo , dvo , Vo 
+r„ = + + ^ + - 
+
+r \dx dr r J 
+^(duo , dvo\ 
+
+. . fduo , dvo\ 
+
+= ;,smO —+ -^ . 
+
+
+Tyz = Tzy = 2n sin 6 cos 0 
+
+
+dvo Vo 
+
+
+~ ^dx ' 
+qy = -kcose-^ , 
+
+dT 
+
+qjs = -ksinO-—- . (67) 
+
+-‘jLSsuming small we can integrate in 0 and drop the ^;-momentum equation to obtain 
+
+-I- 2i^l^r{F- F,)e=o dr 
+
+- 2^ / r {G - Gv)e=o dx 
+J So 
+
+-k / [- sin^ (G - G„)(?=+v, + cos if; {H - i7„)o=+^] • n 5 =+^ dS" 
+
+•^^Front 
+
++ [- sin if’ {G - Gv) 0 =-^ - cos if’ {H - i7„)0=_^] • ne=-^ dS 
+
+J Ssack 
+
+= 0 , (68) 
+
+where the line integrals over So are analogous to the contributions from the North, South, 
+
+East and West interfaces in the two-dimensional case while the integrals over SFront and Ssack 
+are the contributions from the 0 = -f-i/) (Front) and 0 = -xj} (Back) interfaces respectively. 
+
+
+A.3 Treatment of the interfaces at 0 = 
+
+Now, we move the Front and Back interface contributions to the right-hand-side and approx¬ 
+imate the integrals by an average times the interface area, A. The result may be considered 
+
+
+31 
+
+
+
+
+
+
+an effective source term 
+
+
+Q' 9. = -A [- sin i>{G - + cos 0 (jY -• 
+
+-A [- sin tl}{G - Gv)o==-ti> — cos i{){H — Hv)e~. i] , 
+
+
+where 
+
+
+A = j X dy 
+Jso 
+
+
+(69) 
+
+
+(70) 
+
+
+Substituting the expressions for G, (?„, H and //„, and taking the limit of sma.ll V”? we obtain 
+
+
+Q' n = 2x1)A 
+
+
+0 
+
+0 
+
+Pq — Toe 
+0 
+0 
+
+
+where we define 
+
+
+- ^ ‘^0 , . (duQ dvo , Uo\ 
+
+Too s 2fx— + A — + — + — . 
+
+r \ ox or r ) 
+
+
+Note that the quantities in Q' are evaluated at the cell centre. 
+
+
+(71) 
+
+
+(72) 
+
+
+A.4 Summary of the Axisymmetric Equations 
+
+Reverting to (®,7/) notation without the zero subscripts, and dividing through by equation 
+(54) gives the governing equations lor axisymmetric flow as 
+
+d<U> 
+
+
+dt 
+
+
++ yF.) dy--^ jf (sG - yG.) dx = Q' 
+
+
+(73) 
+
+
+where the £7, F and G vectors are 
+
+
+U = 
+
+
+p 
+
+
+pu 
+
+
+pv 
+
+pu 
+
+
+pu^ -f P 
+
+
+puv 
+
+pv 
+
+II 
+
+pvu 
+
+, yG = y 
+
+pv"^ -h P 
+
+pE 
+
+
+pEu -{- Pu 
+
+
+pEv -f Pv 
+
+. Pfi^ , 
+
+
+PfiaU 
+
+
+PfisV 
+
+
+(74) 
+
+
+Note that, except for the premultiplying factor, they are the same as those in the planar 
+two-dimensional situation defined in (3). The viscous terms are 
+
+
+yF-o = 
+
+
+0 
+
+
+0 
+
+yTxx 
+
+
+yTyx 
+
+yTxy 
+
+, yGv = 
+
+
+yTxxU + yTxyV -f- yqx 
+
+
+yryxU + XJTyyV -1- Xjqy 
+
+yP^x,is^ is 
+
+
+ypyy,{syis 
+
+
+(75) 
+
+
+32 
+
+
+
+
+
+where 
+
+
+and 
+
+
+
+
+Tyy — 
+
+
+Txy — Tyx — 
+
+
+^ du . f du dv 
+
+2^|i+Af|^i+|5;+2' 
+
+dy \dx dy yj 
+(du dv 
+^ \9y dx 
+
+
+Qx 
+
+% 
+
+
+,dT 
+
+dx 
+
+,dT 
+
+dy 
+
+
+5 
+
+
+(76) 
+
+
+(77) 
+
+
+Treating the viscous 
+singularity at y = 0. 
+contributions) is 
+
+
+:v.atributions in the form yr avoids any difficulties with the geometry 
+The Jfective source term (containing the Front- and Back- interface 
+
+
+
+0 
+
+0 
+
+{P-Teg)A/^' 
+
+0 
+
+0 
+
+
+(78) 
+
+
+where 
+
+„ u . fdu dv v\ 
+
+Too = 2y —1- A I —1- —1— 1 
+
+y \ax dy yJ 
+
+These equations are equivalent to those used by Eklund [34]. 
+
+
+(79) 
+
+
+Finally, we note that the treatment described here (including discretization) preserves 
+free-stream properties. This was checked by running the cylinder test case in Section 3.6 with 
+tangency conditions along the cylinder. A 30 x 30 grid was used and the viscous equations 
+were integrated to t = 2.0 x 10“^s. No variation weis seen in the flow field. 
+
+
+33 
+
+
+
+
+
+
+
+
+
+y 
+
+^min Xjnax 
+
+0.2 
+
+4.0 
+
+- 3.0 
+
+0.12 8.4 
+
+0.75 1.55 
+
+0.55 1.48 
+
+
+Table 1: Argument ranges for 1% error. 
+
+
+B Approximate Power Routine 
+
+
+When computing s we can break the calculation into stages and compute 2 : = 
+
+exp[y /n(x)]. For x reasonably close to 1. we may approximate the logarithm with 
+
+
+ln{x) 
+
+
+~ 2 
+
+
+1 3 1 5 1 7 
+
+r + -r^ ■+ -r® + -r 
+
+
+where 
+
+
+r 
+
+
+X — 1 
+X +1 
+
+
+The exponential is then approximated by the usual expansion 
+
+
+^ 
+
+0 - l + ‘+2! + S + 4!'''5i ■ 
+
+
+(80) 
+
+( 81 ) 
+
+
+(82) 
+
+
+This procedure produces results with less than 1% error for the arguments shown in Table 1. 
+The floating-point operation count is 30. Note that the exponent in equation (24) is fairly 
+small over the range of effective specific heats tA,,.xted for most gasdynamic situations 
+and the approximation is used if the base (x = Pl/Pr) is within the first range shown in 
+Table 1. However, the exponent in equation (21) is usually large (5 < y < 12) and so, the 
+approximation is applied to equation (21) as 
+
+
+34 
+
+
+
+
+
+C Header File 
+
+
+/* cns4u.h 
+
+* Header file for the flow solver code cns4u.c. 
+
+* 
+
+* NOTE... 
+
+* - 
+
+* We need to include the files "compilers.h" and "physics.h" 
+
+* before this file. 
+
+*/ 
+
+
+#define DEBUG 1 
+/* 
+
+* Debugging level... 
+
+* 0 = no debugging 
+
+* 1 = print message on entry to infrequently used functions 
+
+* 2 = print message on entry to frequently used functions 
+
+* 3 = dump data every step 
+
+* 
+
+*/ 
+
+/*- 
+
+
+/*****★**********★★************/ 
+/* Data Structure Definitions */ 
+/******************************/ 
+
+
+/* 
+
+* 
+
+
+* types of boundary conditions for blocks 
+
+* ADJACENT adjacent to another tile 
+
+
+SUP_IN 
+
+SUP_OUT 
+
+SLIP 
+
+ADIABATIC 
+FIXED T 
+
+
+* SPECIAL 
+
+* 
+
+* 
+
+*/ 
+
+
+supersonic inflow 
+supersonic outflow 
+slip/tangency (adiabatic) 
+no-slip, adiabatic 
+no-slip, fixed T wall 
+
+special purpose code has been included in 
+the routines apply_inviscid_bc() and 
+apply_viscous_bc(). 
+
+
+fdefine 
+
+ADJACENT 
+
+0 
+
+#define 
+
+SUP IN 
+
+1 
+
+tdefine 
+
+SUP OUT 
+
+2 
+
+#define 
+
+SLIP 
+
+3 
+
+fdefine 
+
+ADIABATIC 
+
+4 
+
+fdefine 
+
+FIXED_T 
+
+5 
+
+fdefine 
+
+SPECIAL • 
+
+-i 
+
+
+
+
+
+
+/* 
+
+* types of blocks 
+
+* shock-layer, boundary-layer, outer-region 
+*/ 
+
+#define INACTIVE 0 
+tdefine BL 1 
+fdefine SL 2 
+#define OR 3 
+
+/* 
+
+
+* NL : number of levels in the time-stepping procedure 
+
+* DATA_DIM : Spatial dimensions of data 
+*/ 
+
+#define NL 2 
+
+fdefine DATA DIM 2 
+
+
+typedef struct cell_center 
+{ 
+
+/* GEOMETRY */ 
+
+
+double 
+
+X, Y;’ 
+
+/* Centre coordinates, m 
+
+*/ 
+
+double 
+
+volume; 
+
+/* Cell volume (unit depth), m**3 
+
+*/ 
+
+double 
+
+area; 
+
+/* {x,y)-plane area, m**2 
+
+*/ 
+
+
+/* PRIMARY VARIABLES */ 
+
+
+double 
+
+rho; 
+
+/* density, kg/m**3 
+
+*/ 
+
+double 
+
+u; 
+
+/* normal velocity, m/s 
+
+*/ 
+
+double 
+
+V, w; 
+
+/* tangential velocities 
+
+*/ 
+
+
+
+/* nominal directions for u,v,w 
+
+*/ 
+
+
+
+/* are x,y,z respectively 
+
+*/ 
+
+double 
+
+e; 
+
+/* specific internal energy, J/kg 
+
+*/ 
+
+double 
+
+p; 
+
+/* pressure. Pa 
+
+*/ 
+
+double 
+
+a; 
+
+/* speed of sound, m/s 
+
+*/ 
+
+double 
+
+T; 
+
+/* temperature, K 
+
+*/ 
+
+double 
+
+mu; 
+
+/* viscosity, Pa.s 
+
+*/ 
+
+double 
+
+f[NSPECD]; 
+
+/* species mass fractions 
+
+*/ 
+
+
+/* CONSERVED VARIABLES */ 
+
+/* mass and specied appear above */ 
+
+
+double 
+
+ru; 
+
+/* X-momentum/unit volume 
+
+*/ 
+
+double 
+
+rv; 
+
+/* Y-momentum/unit volume 
+
+*/ 
+
+double 
+
+rE; 
+
+/* Total Energy/unit volume 
+
+*/ 
+
+double 
+
+DrDt[NL]; 
+
+/* updates for density/mass 
+
+*/ 
+
+double 
+
+DruDt{NL]; 
+
+/* X-momentum 
+
+*/ 
+
+double 
+
+DrvDt[NL]; 
+
+/* y-momentum 
+
+*/ 
+
+double 
+
+DrEDt[NL]; 
+
+/* Total Energy 
+
+*/ 
+
+double 
+
+DfDt[NL][NSPECD] 
+
+1; /* Species mass fractions 
+
+*/ 
+
+
+/* PRODUCTION 
+
+VECTOR */ 
+
+
+doubJ a 
+
+
+/* Mass production from sources 
+
+*/ 
+
+double 
+
+Q_ru; 
+
+/* X-Momentum from body forces 
+
+*/ 
+
+double 
+
+Q rv; 
+
+/* Y-Momentum from body forces 
+
+*/ 
+
+double 
+
+Q rE; 
+
+/* Total Energy production 
+
+*/ 
+
+double 
+
+); 
+
+Q rf[NSPECD]; 
+
+/* Species production; reactions 
+
+*/ 
+
+
+36 
+
+
+
+
+
+
+
+
+typedef struct cell_interface 
+
+{ 
+
+/* GEOMETRY */ 
+
+double length; /* Interface length in the x,y-plane */ 
+
+double cosX, cosY; /* Directio.- cosines for unit normal */ 
+
+
+/* PRIMARY VARIABLES */ 
+
+double u; /* normal velocity, m/s */ 
+
+double v; /* tangential velocities */ 
+
+double T; /* temperature, K */ 
+
+double k; /* heat flux coefficient */ 
+
+double mu, lambda; /* coefficients of viscosity */ 
+
+/* FLUXES OF CONSERVED QUANTITIES */ 
+double F_r, G_r; /* Mass / unit time / unit area */ 
+
+double F_ru, G_ru; /* X-momentum */ 
+
+double F_rv, G_rv; /* Y-momentum */ 
+
+double F_rE, G_rE; /* Total Energy */ 
+
+double F_rf[NSPECD]; /* Species mass fractions (X-comp)*/ 
+
+double G_rf[NSPECD]; /* Species mass fractions */ 
+
+}; 
+
+
+typedef struct cell_vertex 
+{ 
+
+/* GEOMETRY */ 
+
+double X, Y; /* Coordinates, m */ 
+
+double area; /* x,y-plane area of secondary cells */ 
+
+/* DERIVATIVES OF PRIMARY VARIABLES */ 
+double dudx, dudy, dvdx, dvdy; /* velocity derivatives */ 
+
+double dTdx, dTdy; /* Temperature deriv, */ 
+
+}; 
+
+
+/* 
+
+
+*/ 
+
+
+^***********************************^ 
+/* THE SINGLE-BLOCK Data Structure */ 
+^***********************************^ 
+
+
+typedef struct block_data 
+{ 
+
+/* 
+
+* This data structure should contain everything needed for 
+
+* a single-block solution — both geometry and flow data 
+
+* There are a few references to MULTI-BLOCK data but they 
+
+* should not affect things unless the macro ”MULTI_BLOCK" 
+
+* is defined. 
+
+*1 
+
+§ ifdef MULTI_BLOCK 
+
+struct node_of_graph *mynode; /* node that owns this data */ 
+§ endif 
+
+
+37 
+
+
+
+
+
+
+
+
+double dt; 
+double dtO; 
+double dt_allow; 
+double cfl_target; 
+double sim_time; 
+double cfl_inin, cfl_raax; 
+double cfl_tiny, tijne_tiny; 
+int inax_steps; 
+
+
+int Xorder; 
+int Torder; 
+
+double tplot, dfcplot; 
+double this, dthis; 
+int hncell; 
+
+int hxcell [liDIM] 
+
+
+/* magnitude of time step, s */ 
+/* initial time step */ 
+/* Allowable time step */ 
+/* desired CFi> number */ 
+/* simulation time in seconds */ 
+/* estimates of CFh number */ 
+/* the smallest so far... */ 
+/* max number of time steps */ 
+/* on this grid */ 
+
+/* spatial order 1 or 2 */ 
+/* teits>oral order 1 or 2 */ 
+
+
+/* timer for writing solution */ 
+/* another sainple timer */ 
+
+/* number of sarmle cells */ 
+
+hycell[NDIM]; /* location of sample cell */ 
+
+
+struct flow_state free_str; /* free-streaia properties */ 
+
+struct flow_state init_str; /* initial fiov; properties */ 
+
+/* These are used to set up */ 
+/* uniform flow conditions. */ 
+
+
+int nxdim, nvdiia; 
+
+I* 
+
+* Total number of cells in exch direction for this block. 
+
+* these will be used in the arrav allocation routines. 
+
+*/ 
+
+int nnx, nny; 
+
+/* Number of active cells in the X,Y-directions */ 
+int nghost; 
+
+/* Number of ghost cells around the boundaries. */ 
+
+int ixmin, i>3nax; 
+int ivmin, ivmax; 
+
+/* 
+
+* These index limits are set to allow convenient access 
+
+* to the arrays without having to worry how many buffer 
+
+* cells are present. 
+
+* ixmin <= ix <= ixmax, ivmin <= iy <= ivmax 
+
+* Typically ixmin = iymin =2. 
+
+*/ 
+
+
+int nsp; 
+
+/* Number of species (1 <= nsp <= NSPECD) */ 
+
+int b*:_N, bc_S, be E, be W; 
+
+/* 
+
+* Boundary condition flags for the North, South, East and West 
+
+* block-domain boundaries. Options are ADJACENT, SU?_IN, SU?_OoT, 
+
+* SLIP, ADIABATIC, and FZXEDJT 
+*/ 
+
+
+double Twall_N, Twall_S, Twall S, Twall W; 
+
+/* 
+
+* Wall ten^ratures for use with the FIXED_T boundary condition. 
+
+* (NOTE: Only relevant for viscous flows) 
+
+*/ 
+
+
+3S 
+
+
+
+
+int region_type; 
+
+/* 
+
+* type of region this is (INACTIVE, SL, BL, or OR) 
+
+*/ 
+
+int viscous; 
+
+/* 
+
+* viscous=0: inviscid terms only 
+
+* 1: include viscous terms 
+
+*/ 
+
+int axisymm; 
+
+/* 
+
+* axisymm=0: 2D planar equations 
+
+* 1: 2D axisymmetric equations 
+
+*/ 
+
+double delta[DATA_DIM+1]; 
+
+/* 
+
+* discretization parameters (delta x, delta y, and delta t) 
+
+*/ 
+
+struct cell_center **Ctr; 
+struct cell_interface **VF; 
+struct cell_interfac6 **HF; 
+struct cell_vertex **Vtx; 
+
+/* 
+
+* Most of the data is stored in the preceding arrays. 
+
+* Ctr[ix](iy] = cell center values 
+
+* VF[ix][iy] = vertical face properties 
+
+* HF[ix][iy] = horizontal face properties 
+
+* Vtx[ix](iy] = cell vertex values 
+
+* 
+
+* VF and HF are used to interface to the Riemann solver 
+
+* and to store the interface fluxes. 
+
+* 
+
+* Vtx is used for the viscous terms. 
+
+*/ 
+
+}; /* end of THE data structure definition */ 
+
+/* - */ 
+
+
+39 
+
+
+
+
+
+
+
+/* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+•* 
+
+•k 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+9c 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+
+Indexing of the data. 
+
+
+The following figure shows cell [ix,iy] and its associated 
+vertices and faces. 
+
+
+Vertex C 
+[ix-l,iy] 
++- 
+
+
+West 
+face 
+[ix-l,iy] X 
+
+
+Vertex D 
+(ix-l,iy-l] 
+
+
+Thus. . 
+
+
+North (horizontal) 
+
+face 
+
+[ix, iy] 
+
+-X- 
+
+
+Vertex B 
+[ix,iy] 
+-+ 
+
+
+cell center 
+[ix, iy] 
+o 
+
+
+East (vertical) 
+
+face 
+
+[ix,iy] 
+
+
+-X- 
+
+South 
+
+face 
+
+[ix,iy-l] 
+
+
+-+ 
+
+Vertex A 
+[ix,iy-l] 
+
+
+Active cells are indexed as Ctr[ix][iy], where 
+ixmin <= ix <= ixmax, iymin <= iy <= iymax. 
+
+
+* Acitve vertical interfaces are indexed as VF[ix][iy], where 
+
+* ixn>in-l <= ix <= ixmax, iymin <= iy <= iymax. 
+
+* 
+
+* Acitve horizontal interfaces are indexed as HF[ix][iy], where 
+
+* ixmin <= ix <= ixmax, iymin-1 <= iy <= iymax, 
+
+* 
+
+* Active vertices are indexed as Vtx[ix][iy], where 
+
+* ixmin-1 <= ix <= ixmax, iymin-1 <= iy <= iymax. 
+
+* 
+
+* Space for ghost cells is available outside these ranges but 
+
+* within the dimensioned ranges 
+
+* 0 <= ix <= nxdim-1, 0 <= iy <= nydim. 
+
+* 
+
+*- 
+
+
+40 
+
+
+
+
+
+
+/* 
+
+* _ 
+
+* Indexing Macros 
+
+* __ 
+
+* 
+
+* These macros should make indexing over the A,B,C,D vertices 
+
+* and over the North,South,East,West faces more readable. 
+
+* NOTE that they are defined with respect to the [ix,iy] cell. 
+*/ 
+
+
+/* VERTICES */ 
+
+
+#define 
+
+ixA 
+
+(ix) 
+
+#define 
+
+iyA 
+
+(iy-l) 
+
+#define 
+
+ixB 
+
+(ix) 
+
+#define 
+
+iyB 
+
+(iy) 
+
+#define 
+
+ixC 
+
+(ix-1) 
+
+#define 
+
+iyC 
+
+(iy) 
+
+fdefine 
+
+ixD 
+
+(ix-1) 
+
+#define 
+
+iyD 
+
+(iy-l) 
+
+
+/* CELL 
+
+FACES 
+
+*/ 
+
+tdefine 
+
+ixN 
+
+(ix) 
+
+^define 
+
+iyN 
+
+(iy) 
+
+#define 
+
+ixS 
+
+(ix) 
+
+#define 
+
+iyS 
+
+(iy-l) 
+
+#define 
+
+i.^E 
+
+(ix) 
+
+^iefine 
+
+iyE 
+
+(iy) 
+
+#define 
+
+ixW 
+
+(ix-1) 
+
+#define 
+
+iyW 
+
+(iy) 
+
+
+41 
+
+
+
+
+/* 
+
+*- 
+
+* Mulci-block MACROS 
+
+* - 
+
+* 
+
+* These are used in the boundary condition routines when 
+
+* copying data from multi-block buffers to ghost-cells. 
+
+* 
+
+*/ 
+
+
+#ifdef MULTI BLOCK 
+
+
+/* 
+
+* Directions that neighbors can have 
+
+* 
+
+* when to_direction is NE, SE, NW, SW then 
+
+* to_direction = mod(from_direction+2,4) + 4 
+
+* 
+
+
+* 
+
+* 
+
+* 
+
+X 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+* 
+
+
+when to_direction is N, S, E, W then 
+to_direction - mod(from_direction+2,4) 
+
+Here is a stencil ... and the indexing equivalent 
+
+
+N 
+
+
+(i .j+1) 
+
+I 
+
+
+
+(i-l,j ) — (i ,j 
+
+
+(i+l,j ) 
+
+
+S 
+
+
+(i ,j-l) 
+
+
+*/ 
+
+
+#define NORTH 0 
+#define EAST 1 
+#define SOUTH 2 
+^define WEST 3 
+^define NORTHWEST 4 
+#define SOUTHWEST 5 
+#define NORTHEAST 7 
+^define SOUTHEAST 6 
+
+
+Sendif 
+
+
+42 
+
+
+
+
+
+
+
+
+
+Figure 1: Finite-volume cell and indexing convention: “o” denotes a cell centre; denotes 
+
+a vertex; denotes an interface midpoint. 
+
+
+43 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if (u* > 0) then 
+
+
+The contact-discontinuit}' hcis moved to the right 
+and the interface state is determined from the 
+L and L* states. 
+
+if {P" > Pl) then 
+The left-moving wave is a shock, 
+if {wsi > 0) then 
+
+All waves have moved to the right. 
+
+Interface state is equal to L. 
+else 
+
+Interface state is equal to T*. 
+endif 
+else 
+
+The left-moving wave is a rarefaction, 
+if {ul — ctL > 0) then 
+All waves have moved to the right. 
+
+Interface state is equal to L. 
+elseif (u2 — «£, > 0) then 
+The rarefaction straddles the interface. 
+Interpolate the interface state from 
+states L and L*. 
+else 
+
+The entire rarefaction moved to the 
+left of the interface. 
+
+Interface state is equal to L*. 
+endif 
+endif 
+
+
+The contact discontinuity has moved to the left 
+and the interface state is determined from the 
+R and R* states in a similar manner... 
+
+endif 
+
+
+Figure 4: Interpolation logic for the Riemann solver. 
+
+
+46 
+
+
+East Boundary i = imax 
+
+
+North Boundary j = jmax 
+C’ i,3 B’ 
+
+
+
+D’ ij A’ 
+
+South Boundary j = j^in ~ 1 
+
+
+
+Figure 5: Definition of the secondary (half-)cells along the boundaries. The i,j vertex is 
+identified in each case. 
+
+
+47 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+X, m X, m 
+
+
+Figure 7: Flow state in the high temperature shock tube at t = 1.25 x 10"^s. 
+
+
+49 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+51 
+
+
+
+
+
+
+
+
+
+
+
+Rea 
+
+
+0 
+
+! 
+
+•y 
+
+3 
+
+3 
+
+3 
+
+e 
+
+
+I 
+
+
+density con 
+[13a) in Gla 
+
+
+Ct. ft 
+
+
+
+
+
+
+
+
+
+
+Free Stream 
+
+
+(0.0,0.06)f 
+
+
+,^(1.0,0.70) 
+
+
+Figure 11: Boundary layer along a flat plate with M = 2.0 and Rer = 1 65 x in®- flr 
+domam; (b) 100 x 100 mesh joining the cell centres. ’ ®' 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+W 312.0 
+
+
+V 310.0 
+
+
+T 306.0 
+
+
+S 3M.0 
+
+
+n 302.0 
+
+
+0 300.0 
+
+P 298.0 
+0 296.0 
+
+
+H 
+
+282.0 
+
+G 
+
+280.0 
+
+F 
+
+278.0 
+
+E 
+
+276.0 
+
+0 
+
+274.0 
+
+C 
+
+272.0 
+
+B 
+
+270.0 
+
+A 
+
+268.0 
+
+
+4 256.0 
+
+3 254.0 
+
+2 252.0 
+
+
+Figure 14: Boundary layer along a flat plate with M = 2.0 and Rcl = 1.65 x 10®: (a) 50 x 50 
+mesh joining cell centres; (b) Pressure contours at i = 8.0 x 10"®s. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+X, m 
+
+
+Figure 16; M = 1.5 inviscid flow over a 20° cone: (a) flow geometry; (b) 100 x 100 mesh 
+joining cell centres. 
+
+
+58 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+0.75 
+
+m 
+
+0.50 
+
+
+0.25 
+
+
+
+0.25 0.50 0.75 1.00 
+
+X, m 
+
+
+Level 
+
+F 3.892E-1 
+E 3.678E-1 
+0 3.465E-1 
+
+C 3.25) E-1 
+B 3.037E-1 
+A 2.824E-1 
+9 2.610E-) 
+
+8 2.396E-1 
+
+7 2.183E-1 
+
+6 ).369E.) 
+
+5 1.755E-1 
+
+4 l.S42E-t 
+3 1.328E-1 
+
+2 1.114E-1 
+
+1 9.007E-2 
+
+4-1-1-1-1—1 
+
+1.25 
+
+
+
+l.Oms 
+
+
+
+0.75 
+
+
+n 
+
+0.50 
+
+
+0.25 
+
+
+
+
+0.25 
+
+
+0.50 
+
+
+0.75 
+
+
+1.00 
+
+
+X, m 
+
+
+Level 
+
+F 4.105E-1 
+E 4.029E-1 
+0 3.953E-) 
+
+C 3.877E-) 
+
+B 3.802E-1 
+A 3.726E-1 
+9 3.6S0E-1 
+
+8 3.S75E-1 
+
+7 3.499E-1 
+
+6 3.423E-1 
+
+5 3.348E-1 
+
+4 3.272E-1 
+
+3 3.196E-1 
+
+2 3.120E-t 
+
+1 3.04SE-1 
+
+4—I—I-1—I—I 
+
+1.25 
+
+
+Figure 17: Early evolution of the density field over the cone. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+6i 
+
+
+
+
+
+
+
+
+
+
+
+Figure 19: Boundary layer along a cylinder with M = 2.0 and Rcl = 1.65 x 10®: (a) flow 
+geometry; (b) 50 x 50 mesh joining cell centres. 
+
+
+61 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 21; Comparison of the present solution (“o”= 70 x 70 grid, “A”- 50 x 50 grid) with 
+a spectral solution (solid line): (a) x-velocity profile at x = 0.916m; (b) temperature profile 
+at the same station. 
+
+
+63 
+
+
+
+
+
+
+
+
+
+X. m 
+
+
+Figure 23; Evoluticn of the density field around the sphere for an inviscid simulation; (a) 
+Case Ij t = 8.66 x 10“®s; (b) Case 1, t = 5.47 x 10“®s. denotes the experimental 
+correlation. 
+
+
+lL 
+
+
+
+
+
+
+
+
+0.0100 
+
+
+0.0050 
+
+
+0.0000 
+
+
+-0.0050 
+
+
+- 0.0100 
+
+
+
+- 0.010 
+
+
+X, m 
+
+
+Figure 24; Density field around the sphere for two viscous simulations with tangency 
+boundary conditions: (a) Case 2, t = .3.76 x 10“®s, first-order interpolation; (b) Case 3, 
+I = 4.01 X 10“^s, high-order MUSGL interpolation. 
+
+
+6i 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+7.5000E4 
+
+-P, Pc 
+
+
+5.0000E4 
+
+
+2.5000E4 
+
+
+(b) 
+
+
+
+I 
+
+
+I 
+
+
+0 OOOOEO MVV~MVV^*WTA- ■rwvTr'jTrw4 nnrv.-M-u^ru^rv - uSrin^ 
+-9.01 OOC -0.O0950 -Q.00900 
+
+
+
+
+-0.00850 
+
+
+0.00800 
+
+
+X, m 
+
+
+Figure 25: Flow properties for the cells adjacent -o the (p = 0) stagnation line for case 3 
+(a) density; (b) pressure. 
+
+
+67 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+(W\SA 
+
+NJ'OOJ. Arc 
+
+bf <e vor* 
+
+
+Report Documentation Page 
+
+
+1. Report No. 2. Government Accession No. 
+
+NASA CR-187613 
+
+ICASE Interim Report 18 
+
+3. Recipient's Catalog No. 
+
+4. Title and Subtitle 
+
+5. Report Date 
+
+SINGLE-BLOCK NAVIER-STOKES INTEGRATOR 
+
+July 1991 
+
+
+6. Performing Organization Code 
+
+7. Author(s) 
+
+8. Performing Organization Report No. 
+
+P. A. Jacobs 
+
+Interim Report No. 18 
+
+
+10. Work Unit No 
+
+9. Performing Organization Name and Address 
+
+505-90-52-01 
+
+Institute for Computer Applications in Science 
+
+11. Contract or Grant No. 
+
+and Engineering 
+
+
+Mail Stop 132C, NASA Langley Research Center 
+
+NASI-18605 
+
+Hampton, VA 23665-5225 
+
+13. Type of Report and Period Covered 
+
+12. Sponsoring Agency Name and Address 
+
+
+National Aeronautics and Space Administration 
+
+Contractor Report 
+
+Langley Research Center 
+
+14. Sponsoring Agency Code 
+
+Hampton, VA 23665-5225 
+
+
+
+15. Supplementary Notes 
+Langley Technical Monitor: 
+Michael F. Card 
+
+
+Final Report 
+
+
+16. Abstract 
+
+
+This report describes a program for the time-integration of the Navier-Stokes equations on a two-dimensional 
+structured mesh. The flow geometry may be either planar or axisymmetric. The unusual features of this program 
+are that it is written in C and makes extensive use of sophisticated data structures to encapsulate the data. The 
+idea of writing the code this way is to make it easier (than traditional FORTRAN codes) to “parallelize” for the 
+Multiple-lnstruction-Multiple-Data style of parallel computer. 
+
+The integral form of the governing equations are given for cartesian coordinates and then the particular dis¬ 
+cretization used in the code is described. A derivation of the axisymmetric equations is given in an appendix. The 
+full version of the code describes a flow domain as a set of abutting blocks, each consisting of a ttn3or~pTod\tct mesh of 
+quadrilateral cells. However, this report considers only the single-block version of the code. The flow field is recorded 
+as cell-average values at cell centres and explicit time stepping is used to update conserved quantities. MUSCL-type 
+Interpolation and a three-stage Riemann solver are used to calculate inviscid fluxes across cell faces while central 
+differences (via the divergence theorem) are used to calculate the viscous fluxes. The Riemetnn solver is suitable for 
+flows with very strong shocks and does not require the entropy fix as applied to the Roe-type solvers. Because the 
+code Is Intended to be a test-bed for implementation on parallel computers, the coding details are described in some 
+detail. 
+
+A set of test problems is also included. These exercise various parts of the code and should be useful for both 
+validation and performance measurements of the (future) parallel implementations. 
+
+
+17. Key Words (Suggested by Author(s)l 
+
+Navier-Scokes, Numerical Simulation, 
+Finite-Volume, Kxemann Solver 
+
+
+19. Security Cla&sif. (of this report) 
+Unclassified 
+
+
+18. Distribution Statement 
+
+34 - Fluid Mechanics and Heat Transfer 
+64 - Numerical Analysis 
+
+
+Unclassified - .ilimited 
+
+
+20. Security Classif. (of this page) 
+
+Jl. No. of pages 
+
+Unclassified 
+
+71 
+
+
+22. Price 
+
+A04 
+
+
+
+NASA'Langlcy, 1991 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

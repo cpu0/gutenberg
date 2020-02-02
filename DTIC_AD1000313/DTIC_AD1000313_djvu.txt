@@ -1,0 +1,865 @@
+Bytecode 2005 Preliminary Version 
+
+
+Kleene Algebra and Bytecode Verification 
+
+
+LucjaKot 1 Dexter Kozen 2 
+
+Department of Computer Science 
+Cornell University 
+Ithaca, New York If853-7501, USA 
+
+
+Abstract 
+
+Most standard approaches to the static analysis of programs, such as the popular 
+worklist method, are first-order methods that inductively annotate program points 
+with abstract values. In [6] we introduced a second-order approach based on Kleene 
+algebra. In this approach, the primary objects of interest are not the abstract data 
+values, but the transfer functions that manipulate them. These elements form a 
+left-handed Kleene algebra. The dataflow labeling is not achieved by inductively 
+labeling the program with abstract values, but rather by computing the star (Kleene 
+closure) of a matrix of transfer functions. In this paper we show how this general 
+framework applies to the problem of Java bytecode verification. We show how to 
+specify transfer functions arising in Java bytecode verification in such a way that 
+the Kleene algebra operations (join, composition, star) can be computed efficiently. 
+We also give a hybrid dataflow analysis algorithm that computes the closure of a 
+matrix on a cutset of the control flow graph, thereby avoiding the recalculation 
+of dataflow information when there are cycles in the graph. This method could 
+potentially improve the performance over the standard worklist algorithm when a 
+small cutset can be found. 
+
+Key words: Java, bytecode, verification, static analysis, abstract 
+
+interpretation, Kleene algebra 
+
+
+1 Introduction 
+
+Dataflow analysis and abstract interpretation are concerned with the static 
+derivation of information about the execution state at various points in a 
+program. There is typically a semilattice L of types or abstract values, each 
+describing a larger set of runtime values. Each instruction has one or more 
+associated transfer functions f : L L that describe how the abstract state 
+is transformed by the instruction. 
+
+1 Email: lucja@cs.cornell.edu 
+
+2 Email: kozen@cs.cornell.edu 
+
+This is a preliminary version. The final version will be published in 
+Electronic Notes in Theoretical Computer Science 
+URL: www.elsevier.nl/locate/entcs 
+
+
+
+Kot and Kozen 
+
+
+The worklist algorithm for dataflow analysis is a standard method for com¬ 
+puting a least fixpoint labeling of the nodes of the control flow graph G with 
+elements of L [5] . Starting with initial information at the start node, dataflow 
+information is propagated in a forward direction by applying a transfer func¬ 
+tion to the current dataflow information at a node and updating successor 
+nodes until a fixpoint is achieved. 
+
+One disadvantage of the worklist approach is that nodes in the graph may 
+be analyzed multiple times. For example, if a node s is labeled with f 6 f, 
+then later revisited and relabeled with t’ > £, then any paths out of s may be 
+traversed again. The running time could be as bad as dn, where n is the size 
+of the program and d is the depth of the semilattice, although in practice this 
+worst-case bound is probably rarely attained. Thus the worklist algorithm 
+remains a popular method for many practical program analysis tasks. 
+
+The worklist method is a first-order method in the sense that the primary 
+objects of interest are the elements of the semilattice L. In [6] we intro¬ 
+duced a second-order functional approach based on Kleene algebra. In this 
+approach, the primary objects of interest are not the abstract data values, 
+but the transfer functions that manipulate them. These elements form a (left- 
+handed) Kleene algebra. Kleene algebras are a well-known family of algebraic 
+structures with a rich theory and many applications in computer science. In 
+the second-order approach, the least fixpoint labeling is not achieved by in¬ 
+ductively labeling the program with abstract values, but rather by computing 
+the star (Kleene closure) of a matrix of transfer functions. 
+
+In this paper we demonstrate how this general framework applies to the 
+problem of bytecode verification. For concreteness, we focus on Java. The 
+contributions of this paper are twofold: (i) we give an explicit specification 
+mechanism for transfer functions that allows the Kleene algebra operations 
+(join, composition, star) to be computed efficiently (Section 3); and (ii) we 
+present a dataflow algorithm that computes the closure of a matrix of transfer 
+functions on a cutset of the control flow graph, thereby avoiding the recal¬ 
+culation of dataflow information (Section 4). This method could potentially 
+improve the performance over the standard worklist algorithm when a small 
+cutset can be found. 
+
+
+2 Background 
+
+2.1 Upper Semilattices 
+
+Our abstract data values will form an upper semilattice L with join + and 
+bottom element J_. The operation + is associative, commutative, and idem- 
+potent ( x + x = x). The semilattice is partially ordered by x < y ^ x + y = y. 
+The element J_ is the least element of the semilattice and is an identity for 
++. We also assume the ascending chain condition (ACC): no infinite ascend¬ 
+ing chains in L. This is a standard assumption that ensures that dataflow 
+
+
+Kot and Kozen 
+
+
+computations converge. It follows from this assumption that there exists a 
+maximum element T. 
+
+Intuitively, lower elements in the semilattice represent more specific in¬ 
+formation, and the join operation represents disjunction of information. For 
+example, in the Java class hierarchy, the join of String and StringBuffer is 
+Object, their least common ancestor in the hierarchy. 
+
+The element T represents a type error. In practice, any attempt by a 
+dataflow analysis computation to form a join x + y that does not make sense 
+indicates a fatal type error, and the analysis will be aborted. We represent 
+this situation mathematically by x + y = T. 
+
+The element J_ represents “unlabeled”. For example, the initial labeling 
+in the worklist algorithm is a map wq : V —> L, where V is the set of vertices 
+of the control flow graph, such that Wo(so) is the initial dataflow information 
+available at the start node so, and wq(u) = J_ for all other nodes u G V. 
+
+2.2 Kleene Algebra 
+
+A Kleene algebra (KA) is a structure (K, +, -, *, 0, 1) such that 
+
+(i) (K, +, -, 0, 1) is an idempotent semiring, 
+
+(ii) ba* the least x such that b + xa < x, and 
+
+(iii) a*b is the least x such that b + ax < x. 
+
+Here “least” refers to the natural partial order a<b<^a + b = b. 
+
+For this paper, we use a weaker axiomatization from [6]. We will as¬ 
+sume that the algebra is left-distributive, but not necessarily right-distributive. 
+However, we will assume that it is right -predistributive. That is, we do not 
+assume that ac + be = (a + b)c, but only ac + be < (a + b)c. Moreover, we 
+will not assume (iii) above, but only (ii). Such algebras are called left-handed 
+Kleene algebras. 
+
+The operation + gives the supremum with respect to <. One can show that 
+all the operations are monotone with respect to <. The proof of monotonicity 
+of multiplication does not need distributivity, but only predistributivity. 
+
+An important fact is that the n x n matrices over a (left-handed) Kleene 
+algebra again form a (left-handed) Kleene algebra under the appropriate def¬ 
+initions of the operators. We refer the reader to [7,6] for a more complete 
+treatment. 
+
+2.3 Strict Monotone Functions on a Semilattice 
+
+In our application, we model transfer functions as strict monotone functions 
+/ : L —> L, where L is an upper semilattice satisfying the ascending chain 
+condition. The maps / must satisfy 
+
+
+x < y=>f(x) < f(y ) 
+
+/(-L) = J- 
+
+
+( 1 ) 
+
+( 2 ) 
+
+
+Kot and Kozen 
+
+
+There are particular strict monotone functions 
+0 = Ax._L 1 = Xx.x. 
+
+The domain of / is the set 
+
+dom f — {x G L | f(x) ± T}. 
+
+The property (1) implies that dom / is closed downward under <. 
+
+Let K denote the family of strict monotone functions on L. We can impose 
+a left-handed Kleene algebra structure on K as follows. First, define addition 
+of functions pointwise: 
+
+(f + g)(x) = f(x)+g{x) 
+f < g^f + g = g. 
+
+Under this definition, K forms an upper semilattice with least element 0. 
+
+Elements of K can be composed using ordinary functional composition. 
+The operator is written • and the composition of / followed by g is written fg ; 
+thus (fg)(x) = g(f(x)). Note that x G dom fg iff x G dom / and f(x) G dom g. 
+The function 1 is a two-sided identity for composition and 0 is a two-sided 
+annihilator. 
+
+Composition distributes over + on the left, but not necessarily on the 
+right. However, it is right-subdistributive due to monotonicity. Thus K forms 
+a left-handed idempotent semiring under the operations +, -, 0,1. 
+
+The element f* is defined as the function which on input x gives the least 
+y such that x + f(y ) < y. In symbols, 
+
+f*(x) = ny-(x + f(y) <y), 
+
+where /i is the usual least-fixpoint operator. The least fixpoint exists, since / 
+is monotone and the ACC holds, so the monotone sequence 
+
+X, x + f(x), X + f(x + f(x)), ... 
+
+converges after a finite number of steps, but not necessarily uniformly bounded 
+in x; a counterexample is given by the semilattice consisting of N U {oo} with 
+min as join and the strict monotone function / that on input x gives oo if 
+x = oo, x — 1 if x > 1, and 0 if x = 0. 
+
+Theorem 2.1 ([6]) The structure (. K , +, •, *, 0, 1) is a left-handed Kleene 
+algebra. 
+
+3 Application to Java 
+
+The Java bytecode verification algorithm, as described in the Java Virtual 
+Machine (JVM) specification [9], is a worklist algorithm. The official speci¬ 
+fication of the algorithm in [9] is operational, but there have been numerous 
+attempts at a more mathematical treatment [1,2,3,8,10]. 
+
+In this application, the elements of L describe the current state of the local 
+variables and operand stack, which comprise the stack frame of the currently 
+
+
+Kot and Kozen 
+
+
+executing method. The top element T and bottom element _!_ of L are artificial 
+elements representing a type error and an unlabeled state, respectively. Every 
+other element of L consists of 
+
+(i) an assignment of types from a semilattice L 0 , described below, to a local 
+variable array, and 
+
+(ii) a bounded-depth operand stack containing values from L 0 . 
+
+These assignments must satisfy certain constraints, as described below. 
+
+The semilattice L 0 describes the types of local variables and operand stack 
+elements. In the JVM, local variables do not have a fixed type, but are allowed 
+to contain different types at different points of the program. The semilattice 
+L 0 has top element Useless representing uninitialized or otherwise unusable 
+values (not to be confused with the top element T of L). 
+
+When merging the state of the local variable array and operand stack at 
+the confluence of two or more control flow paths, the resulting state is the join 
+in L of the states produced by the different paths. The states must satisfy 
+certain compatibility conditions, or they cannot be merged; in that case, the 
+join in L is T, representing a type error. For example, the stack depths must 
+be the same, and the join in Lq of corresponding stack entries may not be 
+Useless. However, the join of corresponding local variables may very well be 
+Useless. 
+
+Just below Useless in L 0 are several incomparable type hierarchies. The 
+first is the Java class hierarchy with top element Object representing all refer¬ 
+ence values, including interfaces and arrays. Array types below Object consist 
+of dimension and component type information. There is a least reference type 
+Null, representing the null reference. The type Null is a subtype of all other 
+reference types. 
+
+Also directly below Useless are the types Int, Float, Long, and Double. 
+The type Int represents the Java primitive types int, byte, char, short, and 
+boolean. In the JVM, all these values are represented as integers. 
+
+Finally, there is a collection of incomparable type hierarchies representing 
+return addresses from embedded j sr subroutines used in the implementation 
+of the Java try-catch-hnally construct. These subroutines are well known to 
+cause special problems for bytecode verification [2,3,8,10]. Given the extent of 
+the additional complications introduced by jsr/ret, and given that they are 
+a feature specific to Java rather than to bytecode in general, we have chosen 
+to forego their treatment in this paper. 
+
+For p,g6i, the join p + q is defined iff 
+
+• the current stack depths of p and q are the same, 
+
+• the join in Lq of corresponding local variable array elements in p and q is 
+defined, 
+
+• the join in L 0 of corresponding stack elements in p and q is defined and is 
+not Useless. 
+
+
+Kot and Kozen 
+
+
+If p + q is defined, its value is obtained by taking the join in L 0 of the corre¬ 
+sponding local variable array elements in p and q and the same stack as in p 
+and q. If p + q is undefined, we take p + q = T. 
+
+3.1 Specification of Transfer Functions 
+
+A transfer function / : L —> L can be specified in terms of its preconditions 
+and effects. The preconditions are a set of constraints that specify the domain 
+of /, and the effects describe how / changes the abstract state. 
+
+The preconditions and effects can be encoded by triples 
+
+P = (oldD, oldS, oldL) 
+
+E = (newD, newS, newL), 
+
+where: 
+
+• oldS is an array of assertions a <t, where a is a variable and t e L 0 , or just 
+an unconstrained variable a. Each a occurs at most once in oldS. These 
+specify abstract values that are expected to occupy the top few positions on 
+the stack just before execution, and constitute the precondition for typesafe 
+execution. 
+
+For example, the iadd (integer addition) instruction would have oldS = 
+la < Int, f3 < Int], indicating that the instruction expects two integers on 
+top of the stack. The astore 3 instruction (store a reference value in local 
+variable 3) would have oldS — la < Object], indicating that the instruction 
+expects a reference value on top of the stack. The swap instruction would 
+have oldS = [a, /5], indicating that the instruction expects two values of 
+arbitrary type on top of the stack. 
+
+The array oldS does not normally specify the entire stack, just a few of 
+the topmost items. We denote the size of oldS by |oldS|. 
+
+• oldD is the maximum allowed depth of the stack below oldS. This specifies 
+how much free stack space must be available to execute / without stack 
+overflow. For example, if / requires 5 free stack locations and |oldS| is 3, 
+then oldD = maxS — 8, indicating that there may be at most maxS — 8 
+additional elements on the stack below those specified by oldS. The number 
+oldD may be any number between 0 and maxS, inclusive. 
+
+• old L is an array of assertions a < t, where ct is a variable and t e L 0 , or 
+just an unconstrained variable a, specifying the type constraints on local 
+variables that are necessary for typesafe execution of /. Each a occurs at 
+most once in oldL, and the variables in oldS and oldL must be disjoint. For 
+example, the old L array of the aload 3 instruction (load of a reference type 
+from local variable 3) would contain a < Object for local variable 3. 
+
+• newS is an array of expressions involving type values and variables repre¬ 
+senting the effect of the execution of / on the stack. For example, the 
+iadd instruction would have newS = [Int], indicating that the instruc¬ 
+tion returns an integer on top of the stack. If the swap instruction had 
+
+
+
+Kot and Kozen 
+
+
+oldS = [ct,/3], then it would have newS = 1/3, a] . If the aload 3 instruc¬ 
+tion had a < Object for local variable 3, then it would have newS = [a]. 
+We denote the size of newS by |newS|. 
+
+• newD is a number that is either the same as oldD or 0. In most cases, it is 
+the same as oldD, indicating that the stack below oldS is unmodified by the 
+instruction. One exception to this is the athrow instruction, which empties 
+the stack before pushing the exception object. For this instruction, or for 
+any exception thrown by other means, newD will be 0. 
+
+• newL describes the explicit effects of / on the local variables. For example, 
+the newL array of the istore 2 instruction (integer store to local variable 
+2) would specify that local variable 2 contains a after execution of /, where 
+oldS = [a < Int]. Equivalently, local variable 2 of newL might just as well 
+contain the constant Int, since Int is minimal in L 0 , therefore a < Int 
+
+a = Int. 
+
+In addition, newL contains the constraints of oldL that are unaffected by 
+/. For example, for the instruction aload 3, if the oldL array specified 
+a < Object for local variable 3, then the newL array would contain a for 
+local variable 3. 
+
+The arrays newL and newS may contain the symbolic joins of abstract types 
+and type variables. 
+
+These properties will hold for all transfer functions defined from individual 
+bytecode instructions, and our definition of join and composition will preserve 
+them. Thus we can expect them to hold for all functions in our analysis. 
+
+
+3.2 The Transfer Function Specified by P, E 
+
+In this section we show how a specification P, E uniquely describes a transfer 
+function / : L —> L. 
+
+The domain of / is the set of p G L such that (i)-(iii) below hold: 
+
+(i) For each of the topmost |oldS| elements of the stack in p, if the corre¬ 
+sponding element of oldS is a < t, then that element must be less than 
+or equal to t. If the corresponding element of oldS is a variable a, the 
+type is not constrained. 
+
+(ii) For each local variable x, if the x th element of oldL is a < t, then the x th 
+local variable of p must be less than or equal to t. If the X th element of 
+old L is a variable a, then the x th local variable of p is not constrained. 
+
+(iii) The stack depth at p is no greater than oldD + |oldS|. 
+
+Finally, we specify the value of f(p ), where p G dom /. For each local 
+variable x, if the x th element of old L is a < t or a, unify a with the x th 
+element of p. Similarly, for each element of oldS, if that element is either 
+a < t or a, unify a with the corresponding element of the stack of p. Now for 
+each local variable x, evaluate the x th element of newL, which is a symbolic 
+
+
+
+Kot and Kozen 
+
+
+join of variables and constants in Lo, under this substitution. That will be the 
+X th element of the local variable array of f(p). The values of the stack of f(p) 
+corresponding to newS are obtained similarly. If oldD = newD, the remaining 
+elements on the stack at f(p) are unchanged. Otherwise, if newD = 0, the 
+stack contents at f(p) will be just newS. 
+
+3.3 Operations on Transfer Functions 
+
+In this section we describe the Kleene algebra operations on specifications of 
+transfer functions. Before doing so, however, we present an auxiliary operation 
+that is of use when comparing two specifications with different oldS or newS 
+lengths. 
+
+3.3.1 Lengthening 
+
+Given a specification P, E such that oldD = newD > 1, we can lengthen 
+the stacks by adding a new unconstrained variable a to both oldS and newS 
+immediately under the elements already represented there and decrementing 
+oldD and newD by 1. The resulting specification P',E' represents the same 
+transfer function / as P, E with the added restriction that the stacks are 
+constrained to have at least one additional element below oldS and newS. 
+
+In case oldD > 1 but newD = 0, as for example with the athrow instruction, 
+we can lengthen just oldS by adding a new unconstrained variable a to oldS 
+immediately under the elements already represented there and decrementing 
+oldD by 1. The resulting specification P',E' represents the same transfer 
+function / as P, E with the added restriction that oldS must have at least one 
+more element than previously required. 
+
+3.3.2 Join 
+
+Given specifications Pf,Ef and P g ,E g defining transfer functions / and g, 
+respectively, we wish to define Pf+ g and Ef +g . Intuitively, we would like Pf+ g 
+to be the weakest set of constraints implying both Pf and P g , and we would 
+like Ef +g to be the join of Ef and E g . 
+
+The constraints that Pf and P g place on stack depth must not be so strong 
+as to prevent the merging of the stacks. Thus, all of the following properties 
+must hold: 
+
+oldD/ + |oldS/1 > |oldS 9 | 
+oldDg + |oldS g | > |oldS/1 
+newD/ + | newS/1 > |newS 9 | 
+newD g + |newS g | > |newS/|. 
+
+First, if |oldS/| 7^ |oldS s |, say |oldS/| < |oldS s |, we lengthen oldS/ as de¬ 
+scribed in Section 3.3.1 until they are the same length. If this is impossible 
+because oldD/ = 0, it is a type error. Thus we can assume without loss of 
+generality that |oldS/| = |oldS s |. 
+
+
+Kot and Kozen 
+
+
+To define Pj+ g , we first set 
+
+oldD/ +s = f min(oldD/, oldD 3 ). 
+
+This sets oldDf +9 to the stricter of the two constraints imposed by oldDj and 
+oldD (/ . 
+
+The contents of the array oldS/ +9 are the weakest constraints that imply 
+the constraints imposed by both oldS/ and oldS 9 . To define element i in 
+oldS /+g, locate the corresponding elements in oldS / and oldS 9 , counting from 
+the top of the stack. Call these items if and i g . The value of element i in 
+oldS/ +9 is defined as follows. 
+
+• If one of if, i g is a < s and the other is either /3 < t with s < t or just /3, 
+then the corresponding constraint in oldS/ +9 is a < s, since it is the stricter 
+constraint. Unify a and (3 in Pf,Ef,P g ,E g . 
+
+• If if is a and i g is /3, unify the two variables in Pf,Ef,P g ,E g . The corre¬ 
+sponding element of oldS/ +9 is just a. 
+
+• If if is a < s and i g is (3 < t with neither s < t nor t < s, it is a type error. 
+
+We define oldl_/ +9 similarly from oldL/ and oldL^. If the variables in the 
+two arrays are both constrained, say by s and t with s < t, then unify the 
+two variables in Pf,Ef,P g ,E g and constrain it with s in oldL /+ p - If one of 
+the elements is unconstrained, take the other constraint and unify the two 
+variables. 
+
+For Ef +g , we must have |newS/| = |newS 9 |, otherwise it is a type error. 
+Set 
+
+newDj +ff = f min(newDf, newD g ). 
+
+The intuition behind this is the same as for oldD/ +9 . 
+
+Define newl_/_|_ 9 to be the join of newL/ and newl_ 9 . That is, to obtain 
+a particular element in newl_j +9 , take the join in L 0 of the corresponding 
+elements in newL^ and newL 9 . The resulting expression can be simplified if 
+necessary using associativity, commutativity, and idempotence. If any join of 
+two type values in this process is Useless, it is not a type error. 
+
+Similarly, define newS/ +9 to be the join of newS/ and newS 9 , except that 
+a Useless value is a type error. 
+
+3.3.3 Composition 
+
+Say we are given specifications Pf,P g ,Ef,E g of transfer functions / and g. 
+We wish to define Pf g and Ef g . For the composition to be legal, the following 
+conditions must hold: 
+
+newD/ + |newS/| > |oldS 9 | 
+oldD 9 + |oldS 9 | > |newS/|. 
+
+If |newS/| 7 ^ |oldS 9 |, we first lengthen the shorter one as described in 
+Section 3.3.1. If this is not possible because one of oldD 9 or newD f is 0, it is 
+
+
+Kot and Kozen 
+
+
+a type error. Thus we can assume without loss of generality that |newS/| = 
+|oldS 9 |. 
+
+First we define oldD/ g . There are two cases, depending on /: 
+
+. Jr , def I min(newD / ,oldD 9 ), if oldD/ = newD/ 
+
+0| dD/ 9 = < 
+
+I oldD/, otherwise. 
+
+To construct oldl_/ g , we start with oldLf and modify it as follows. 
+
+If local variable x of newL/ contains an expression e with type constant 
+s G Lq and one or more type variables, and if local variable x of old is of the 
+form a < t, we must have s < t, otherwise it is a type error. Intuitively, the 
+type produced by / in that position can be at least s, thus g must not place 
+a stronger constraint on that element. 
+
+Moreover, for all variables f3 in e, if the constraint (3 < u appears in oldLj 
+or oldS/ and t < u, or if (3 appears unconstrained in oldL/ or oldS/, replace the 
+constraint (3 < u or the unconstrained occurrence of [3 in oldLy or oldS/ with 
+(3 < t. Intuitively, the stronger constraint (3 < t imposed by old L p propagates 
+backward through /. If u < t, we do not alter the constraint (3 < u. If neither 
+u < t nor t < u, it is a type error. 
+
+When this has been done for all local variables x, the resulting array is 
+
+ddL fg . 
+
+A similar construction holds for oldS/ 9 . We start with oldS/. If any element 
+of newS/- is an expression e with type constant s G L 0 and one or more type 
+variables, and if the corresponding element of oldSt, is of the form a < t, we 
+must have s < t, otherwise it is a type error. Moreover, as described above, 
+for all variables f3 in e, we propagate the constraint (3 < t backwards through 
+/ if necessary. 
+
+Define Ef g as follows. Again, there are two cases for newD/ 3 , depending 
+on /: 
+
+
+def I min(newD/, oldD 9 ), if oldD 9 = newD 3 
+newD/ ff < 
+
+I newD & , otherwise. 
+
+We compute newL/ 9 and newS/ g as follows. Start with newL g and newS g , 
+respectively. For each local variable with a or a < t in oldL g , unify a with 
+the expression occurring in the corresponding location in newL/, and apply 
+this substitution to newL g and newS 9 , evaluating and simplifying expressions 
+if necessary. Similarly, for each stack entry a or a < t in oldS 9 , unify a with 
+the expression occurring in the corresponding location in newS/, and apply 
+this substitution to newl_ g and newS 9 , evaluating and simplifying if necessary. 
+A type error is signaled if Useless appears in the evaluation of expressions in 
+newS g . The resulting arrays are newl_/ g and newS/ 9 , respectively. 
+
+
+3.3.4 Identity 
+
+The identity function 1 = f Xp.p is specified by: 
+
+
+
+Kot and Kozen 
+
+
+Pi,Ei = ( maxS, U,A), 
+
+where [ ] denotes the empty stack and A is an array of maxL distinct uncon¬ 
+strained variables. 
+
+3.3.5 Star 
+
+Given a specification P, E of a transfer function /, a specification of f* can 
+be computed by taking the join of sufficiently many finite powers of /. For 
+this not to result in a type error, we had better have |oldS/| = |newS/|: if 
+|oldS/j < jnewSf|, then some power of / will result in a stack overflow, and if 
+loldS/l > | newS/j, then some power of / will result in a stack underflow. 
+
+It suffices to take the join of powers f k up to k = |oldS/| + maxL, since this 
+is an upper bound on the number of steps needed for any variable or constant 
+appearing in oldSf or oldLj to propagate to an expression in newS/* or newL/*. 
+Thus /* = (1 + f) k for k = |oldS/| + maxL, which we can compute by repeated 
+squaring in log k steps. 
+
+Example 3.1 Consider the Java fragment 
+
+if (b) x = y + 1; 
+else x = z; 
+
+(i) The assignment x = z might be compiled to the bytecode sequence 
+
+iload 5 
+istore 3 
+
+where the local variables x and z occupy positions 3 and 5 in the local 
+variable array, respectively. The instruction iload 5 has a < int for 
+local variable 5 in oldL (or just int, since a < int implies a = int), 
+oldS = [], and oldD = maxS — 1, indicating that there must be at 
+least one free stack location. The effect of iload 5 has newS = [int], 
+indicating that an int has been pushed onto the stack, and int in position 
+5 of newL. The istore 3 instruction has oldS = [int] and newS = [] , 
+oldD = maxS —1, and int in position 3 of newL. The composition of these 
+two instructions has int for local variable 5 in oldL and for local variables 
+3 and 5 in newL, oldS = newS = [], and oldD = newD = maxS — 1. 
+
+(ii) The assignment x = y+1 might be compiled to the bytecode sequence 
+
+iload 4 
+iconst 1 
+iadd 
+
+istore 3 
+
+where the local variable y occupies position 4 in the local variable array. 
+The composition of these four instructions has int for local variable 4 
+in oldL and for local variables 3 and 4 in newL, oldS = newS = [], and 
+oldD = newD = maxS — 2, since the sequence required two free stack 
+locations. 
+
+
+
+Kot and Kozen 
+
+
+(iii) The entire conditional statement would involve computing the sum of the 
+two bytecode sequences in (i) and (ii). The sum of these two sequences 
+would have int for local variables 4 and 5 in old L and for local variables 
+3, 4, and 5 in newL, oldS = newS = [], and oldD = newD = maxS — 2. 
+
+4 An Algorithm 
+
+In this section we present a hybrid algorithm for dataflow analysis that may 
+give an improvement in performance over the standard worklist algorithm 
+when a small cutset can be found. The algorithm exploits the ability to 
+compute the Kleene algebra operations on transfer functions as defined above. 
+
+We are given a program with n instructions, and we wish to label the un¬ 
+derlying control flow graph G of the program with elements of the semilattice 
+L. Let E be the n x n matrix with rows and columns indexed by the vertices 
+of G such that if (s, t) is an edge of G, then E [s, t] is the transfer function 
+labeling the edge (s,t), and E\_s,t] = 0 if (s,t) is not an edge of G. This 
+matrix is easily constructed in a single pass through the program. 
+
+Recall from Section 2.2 that the n x n matrices over a left-handed Kleene 
+algebra again form a left-handed Kleene algebra. We can thus speak of the 
+matrix E*. The entry E* [u,v] is the join of the composition of transfer 
+functions along all paths from u to v. If we can compute E*, then we can 
+obtain the desired fixpoint dataflow labeling at any node u of G by evalu¬ 
+ating E* [s 0 , u\ (To), where £o G L is the initial label of the start node So- 
+The label £o consists of an empty stack, the types of the arguments to the 
+method (including the object itself if it is an instance method) in the first few 
+local variables, and Useless for the remaining local variables. The value of a 
+transfer function given by its specification P, E on an element l G L can be 
+computed by unifying the variables in oldS and oldL with the corresponding 
+values in £, checking that all constraints a < t in oldS and oldL are satisfied, 
+then evaluating the expressions in newS and newL under this substitution. 
+
+It is shown in [6] that an abstracted version of this method and the stan¬ 
+dard worklist algorithm produce the same fixpoint labeling on all type-correct 
+programs. 
+
+4-1 Small Cutsets 
+
+We do not compute E* directly, because it is too big. Instead, we propose 
+the following hybrid method that uses the preceding ideas in conjunction with 
+the worklist algorithm to avoid recalculating dataflow information. 
+
+Let M be a cutset (also known as a feedback vertex set ) in G; that is, a 
+set of nodes such that every directed cycle of G contains at least one node 
+in M. We also include the start node So i n Tf, even though s 0 may not be 
+a cutpoint. Let m = \M\. Finding a minimum cutset is known to be NP- 
+complete, but solvable in polynomial time for reducible graphs [4], Flowgraphs 
+
+
+Kot and Kozen 
+
+
+of bytecode programs compiled from Java source would ordinarily be reducible. 
+In practice, simply taking M to be the set of all targets of back edges should 
+give a very small cutset. 
+
+Let A, P, C, and D be the M x M, M x (V — M ), (V — M ) x M, and 
+(V — M) x (V — M) submatrices of E, respectively: 
+
+
+E = 
+
+
+A B 
+C D 
+
+
+Let F = A + BD*C and G = D + CA* B. By left-handed Kleene algebra 
+(see [6]), 
+
+
+E * 
+
+
+F* F*BD* 
+G*CA* G* 
+
+
+( 3 ) 
+
+
+The fact that M is a cutset is reflected algebraically by the property 
+jyn—m _ q This is because D n ~ m describes the labels of paths of length 
+n — m through V — M; but by the pigeonhole principle, any such path would 
+have a repeated node, thus would contain a cycle, which must intersect M. 
+Therefore no such path can exist. 
+
+One can show that if P and Q are matrices such that for all i,j, not both 
+Pij and Qij are nonzero, then P and Q satisfy right distributivity with respect 
+to any other matrix R ; that is, (P + Q)R = PR + QR. This holds for / and 
+D, since / has nonzero elements only on the diagonal, and D has only zeros 
+on the diagonal, otherwise those nodes would be outpoints. It follows that 
+(/ + D) k = Yli=o D l - From this fact and the axioms of left-handed Kleene 
+algebra, we have that D * = (/ + D) n ~ m ~ 1 , hence 
+
+F = A + BD*C = A + B(I + D) n ~ m ~ l C. 
+
+
+The mx m matrix F describes the labels of paths from a outpoint to another 
+outpoint that do not go through an intermediate outpoint. Since the subgraph 
+on V — M is acyclic, F can be computed in time 0(mn ) using the traditional 
+worklist algorithm starting from every cutpoint. In each such computation, 
+each vertex of V — M is visited at most once. Alternatively, we could topo¬ 
+logically sort the subgraph and compute the compositions in sorted order. 
+
+As a byproduct of this computation, we also obtain the matrix 
+
+
+H = BD* = B(I + D) n - m -\ 
+
+which describes the labels of paths from a cutpoint to a non-cutpoint that do 
+not go through any other cutpoint. 
+
+Now we need to compute the star of P, but this matrix will typically be 
+much smaller than E. We can do this by a divide-and-conquer method using 
+the recursive definition of the star of a matrix (3). This requires time 0(m 3 ) 
+in the worse case. 
+
+Now to achieve the final dataflow labeling, we observe that the sf, 11 row 
+
+
+
+
+
+
+Kot and Kozen 
+
+
+of F* is a vector of transfer functions F * [s 0 ,w], one for each cutpoint u, 
+which when applied to 4 yields the final dataflow labeling of u. Similarly, 
+the Sq 1 row of F* H is a vector of transfer functions F*H[sq, v] , one for each 
+non-cutpoint v, which when applied to 4 yields the final dataflow labeling of 
+v. Each of the m values F* [s 0 ,u] (4) can be calculated in constant time, or 
+0(m ) in all. Once we have this vector of values, we can calculate 
+
+F*H [s 0 , v] (4) = # [«, v] (F* [s 0 , u] (4)), 
+
+ueM 
+
+which takes time 0(m ) for each v G V, or 0(nm) in all. 
+
+4-2 Complexity 
+
+The worst-case complexity of this algorithm is 0(nm + m 3 ). Compared with 
+the worst-case complexity of the worklist algorithm, namely 0(nd ) where d is 
+the depth of the semilattice L, our algorithm may give an improvement when 
+m is small. 
+
+One other advantage of the second-order method is that it is amenable 
+to parallelization. The worklist method is inherently sequential, since each 
+application of a transfer function requires knowledge of its inputs, whereas 
+compositions can be computed without knowing their inputs. Such questions 
+remain for future investigation. 
+
+Acknowledgement 
+
+Thanks to Stephen Chong, Andrew Myers, and Radu Rugina for valuable 
+discussions. This work was supported in part by NSF grant CCR-0105586 
+and ONR Grant N00014-01-1-0968. The views and conclusions contained 
+herein are those of the authors and should not be interpreted as necessarily 
+representing the official policies or endorsements, either expressed or implied, 
+of these organizations or the US Government. 
+
+References 
+
+[1] Abadi, M. and R. Stata, A type system for Java bytecode subroutines , in: Proc. 
+25th Symp. Principles of Programming Languages, ACM SIGPLAN/SIGACT, 
+1998, pp. 149-160. 
+
+[2] Coglio, A., Simple verification technique for complex Java bytecode subroutines, 
+Concurrency and Computation: Practice and Experience 16 (2004), pp. 647- 
+670. 
+
+[3] Freund, S. N. and J. C. Mitchell, A type system for the Java bytecode language 
+and verifier, J. Automated Reasoning 30 (2003), pp. 271-321. 
+
+[4] Garey, M. R. and D. S. Johnson, “Computers and Intractibility: A Guide to 
+the Theory of NP- Completeness,” W.H. Freeman, 1979. 
+
+
+
+Kot and Kozen 
+
+
+[5] Kildall, G. A., A unified approach to global program optimization , in: Proc. Conf. 
+Principles of Programming Languages (POPL’73), ACM, 1973, pp. 194-206. 
+
+[6] Kot, L. and D. Kozen, Second-order abstract interpretation via Kleene algebra, 
+Technical Report 2004-1971, Computer Science Department, Cornell University 
+(2004). 
+
+URL http://www.cs.Cornell.edu/kozen/papers/KADataflow.pdf 
+
+[7] Kozen, D., A completeness theorem for Kleene algebras and the algebra of 
+regular events, Infor. and Comput. 110 (1994), pp. 366-390. 
+
+URL http://www.cs.Cornell.edu/kozen/papers/ka.ps 
+
+[8] Leroy, X., Java bytecode verification: an overview, in: G. Berry, H. Comon and 
+A. Finkel, editors, Proc. Conference on Computer Aided Verification (CAV 
+2001), Lect. Notes in Computer Science 2102 (2001), pp. 265-285. 
+
+[9] Lindholm, T. and F. Yellin, “The JAVA virtual machine specification,” Addison 
+Wesley, 1996. 
+
+[10] Qian, Z., Standard fixpoint iteration for Java bytecode verification, Transactions 
+on Programming Languages and Systems 22 (2000), pp. 638-672. 
+
+

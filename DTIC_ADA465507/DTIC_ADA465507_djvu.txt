@@ -1,0 +1,3605 @@
+Modular Typestate Verification 
+of Aliased Objects 
+
+
+Kevin Bierhoff* Jonathan Aldrich^ 
+
+March 2007 
+CMU-ISRI-07-105 
+
+
+School of Computer Science 
+Carnegie Mellon University 
+Pittsburgh, PA 15213 
+
+
+institute for Software Research. Carnegie Mellon University, kevin.bierhoff @ cs.cmu.edu. 
+
+' Institute for Software Research. Carnegie Mellon University, jonathan.aldrich @ cs.cmu.edu. 
+
+
+This work was supported in part by NASA cooperative agreement NNA05CS30A, NSF grant CCF-0546550, and 
+the Army Research Office grant number DAAD19-02-1-0389 entitled “Perpetually Available and Secure Information 
+Systems”. 
+
+
+
+Report Documentation Page 
+
+Form Approved 
+
+OMB No. 0704-0188 
+
+Public reporting burden for the collection of information is estimated to average 1 hour per response, including the time for reviewing instructions, searching existing data sources, gathering and 
+maintaining the data needed, and completing and reviewing the collection of information. Send comments regarding this burden estimate or any other aspect of this collection of information, 
+including suggestions for reducing this burden, to Washington Headquarters Services, Directorate for Information Operations and Reports, 1215 Jefferson Davis Highway, Suite 1204, Arlington 
+
+VA 22202-4302. Respondents should be aware that notwithstanding any other provision of law, no person shall be subject to a penalty for failing to comply with a collection of information if it 
+does not display a currently valid OMB control number. 
+
+1. REPORT DATE 
+
+MAR 2007 2. REPORT TYPE 
+
+3. DATES COVERED 
+
+00-00-2007 to 00-00-2007 
+
+4. TITLE AND SUBTITLE 
+
+Modular Typestate Verification of Aliased Objects 
+
+5a. CONTRACT NUMBER 
+
+5b. GRANT NUMBER 
+
+5c. PROGRAM ELEMENT NUMBER 
+
+6. AUTHOR(S) 
+
+5d. PROJECT NUMBER 
+
+5e. TASK NUMBER 
+
+5f. WORK UNIT NUMBER 
+
+7. PERFORMING ORGANIZATION NAME(S) AND ADDRESS(ES) 
+
+Carnegie Mellon University ,School of Computer 
+
+Science,Pittsburgh,PA,15213 
+
+8. PERFORMING ORGANIZATION 
+
+REPORT NUMBER 
+
+9. SPONSORING/MONITORING AGENCY NAME(S) AND ADDRESS(ES) 
+
+10. SPONSOR/MONITOR'S ACRONYM(S) 
+
+11. SPONSOR/MONITOR'S REPORT 
+NUMBER(S) 
+
+12. DISTRIBUTION/AVAILABILITY STATEMENT 
+
+Approved for public release; distribution unlimited 
+
+13. SUPPLEMENTARY NOTES 
+
+14. ABSTRACT 
+
+15. SUBJECT TERMS 
+
+16. SECURITY CLASSIFICATION OF: 17. LIMITATION OF 
+
+18. NUMBER 19a. NAME OF 
+
+a. REPORT b. ABSTRACT c. THIS PAGE 
+
+unclassified unclassified unclassified 
+
+50 
+
+
+Standard Form 298 (Rev. 8-98) 
+
+Prescribed by ANSI Std Z39-18 
+
+
+
+
+
+Keywords: Protocol enforcement, typestates, aliasing, permissions. 
+
+
+
+Abstract 
+
+A number of type systems have used typestates to specify and statically verify protocol compli¬ 
+ance. Aliasing is a major challenge for these systems. This paper proposes a modular type system 
+for a core object-oriented language that leverages linear logic for verifying compliance to more ex¬ 
+pressive protocol specifications than previously supported. The system improves reasoning about 
+aliased objects by associating references with access permissions that systematically capture what 
+aliases know about and can do to objects. Permissions grant full, shared, or read-only access to 
+a certain part of object state and allow aliasing both on the stack and in the heap. The system 
+supports dynamic state tests, arbitrary callbacks, and open recursion. The system’s expressiveness 
+is illustrated with examples from the Java I/O library. 
+
+
+
+
+Contents 
+
+
+1 Introduction 1 
+
+2 Typestate Specifications 4 
+
+2.1 Protocols as State Machines . 4 
+
+2.2 State Refinements and Dimensions. 4 
+
+2.3 Access Permissions. 5 
+
+2.4 Linear Logic Specifications. 5 
+
+3 Verification Approach 6 
+
+4 Formal Language 8 
+
+4.1 Syntax. 8 
+
+4.2 State Spaces. 10 
+
+4.3 Access Permissions. 10 
+
+4.4 Permission-Based Specifications. 11 
+
+4.5 Handling Inheritance. 13 
+
+4.6 Behavioral Sub typing. 13 
+
+5 Modular Typestate Verification 14 
+
+5.1 Permission Tracking . 14 
+
+5.2 Packing and Unpacking. 17 
+
+5.3 Calling Methods. 18 
+
+5.4 Field Assignments . 19 
+
+5.5 Permission Splitting and Joining. 19 
+
+6 Breaking an Invariant in Java Buffered Input Streams 20 
+
+7 Soundness 23 
+
+7.1 Core Language Syntax. 25 
+
+7.2 Judgment Forms. 26 
+
+7.3 Preservation. 26 
+
+7.4 Progress. 34 
+
+8 Related Work 36 
+
+9 Conclusions 38 
+
+1 Introduction 
+
+In well-written software, different parts of the program interact with each other through abstrac¬ 
+tion boundaries (interfaces) that hide state and side effects from each other. Although interfaces 
+
+
+1 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+facilitate understanding and using software, clients of an interface cannot be oblivious to hidden 
+side effects. They typically have to follow a certain protocol in using the interface that is intricately 
+tied to the implemented functionality. For example, clients of a stream interface are expected to 
+first read and then close streams and not vice versa. Conformance to such protocols is notoriously 
+hard to verify. 
+
+Typestates [30] offer a lightweight way of specifying interesting protocols [4] using abstract 
+state machines. Typestates refine the fixed types of objects with changing abstract states. Opera¬ 
+tions perform “state transitions” on objects that change their state from one to another. Fugue [11] 
+is the only existing typestate-based object-oriented protocol verification system that we know of. 
+
+This paper improves Fugue’s reasoning power on two fronts: (1) We propose a type system 
+that can verify compliance to more expressive specifications than previously supported. (2) We 
+improve modular reasoning about protocol compliance of aliased objects. Preliminary case studies 
+suggest that these improvements combined let us go beyond reasoning about objects in isolation 
+and capture object collaborations to some extent. 
+
+Expressive protocols. In earlier work we proposed to increase the expressiveness of existing 
+typestate-based protocols to better match object-oriented software [4]. In particular, we found the 
+need to refine protocols in subclasses and to relate different objects to one another. The former 
+gives freedom in extending base classes; the latter captures common programming patterns such 
+as dynamic state tests and binary methods. Our proposal was based on a hierarchical notion of 
+state spaces similar to Statecharts [19] that can model orthogonal concerns separately and allows 
+protocol refinement with more fine-grained states. Specifications became logical expressions that 
+could relate objects. 
+
+This paper contributes a modular type system that can verify correct usage and implementation 
+of such expressive typestate protocols. Our verification approach is highly inspired by Fugue [11]. 
+We extend state invariants, packing, and frames to work in our context. We improve support 
+for inheritance in comparison to Fugue by decoupling states of frames and reducing overriding 
+requirements. Details about our specification approach will be provided in sect. 2. 
+
+Reasoning about aliased objects. Modular verification of protocol compliance in the pres¬ 
+ence of aliasing is notoriously hard. It basically involves tracking the abstract state of all visible 
+objects and updating these states according to specified state transitions when methods are called. 
+The problem is that method calls could involve invisible manipulation of relevant objects through 
+aliases (i.e. other references to those objects). A simple remedy is to enforce that objects have only 
+one reference, ensuring their linearity [32]. Since no aliases exist, typestate changes through the 
+one available reference are straightforward to track. 
+
+Linearity is extremely restrictive in practice because even method calls (i.e. stack aliasing) 
+become a challenge, let alone storing references in fields (i.e. heap aliasing). Therefore, most 
+approaches to protocol verification allow some amount of aliasing (e.g. [10, 21, 8]). Ultimately, 
+however, permanent state changes require linearity (or at least all aliases to be in scope [10, 11, 
+15]). Many systems also support sharing (i.e. heap aliasing [12, 15, 21, 8]) of objects, but sharing 
+fixes the state. Focusing constructs allow temporarily leaving a state, but objects have to return 
+to their fixed state before other aliases access them [12, 15]. Some systems also permit harmless 
+read-only access [21, 8]. In summary, state changes are only permitted if linearity guarantees the 
+
+
+2 
+
+
+
+absence of unexpected callbacks. 
+
+This paper proposes to take the opposite route: as a first approximation, objects always have 
+to be prepared for callbacks. It is the object’s protocol that should govern when calls can occur, 
+not the object’s linearity. This work shows that such an approach is feasible. Our approach is 
+to use fine-grained access control to objects in order to constrain possible state changes through 
+invisible aliases; object linearity is no longer needed. Specifically, we use access permissions 
+to keep track of what a reference can do to and knows about the referenced object. A permission 
+grants full, shared , or pure access to a particular part of the object’s state. Other (possibly invisible) 
+permissions to the same object are guaranteed to be consistent: either a distinguished writer (full 
+permission) co-exists with many readers (pure permission) or many writers (shared) co-exist with 
+many readers (pure) of the same state. 
+
+Permissions express design intent by capturing very precisely what access a method needs to an 
+object. Since they are resources, we use linear logic [17] to combine permissions into expressive 
+protocol specifications. Correspondingly, linear logic reasoning is used to track permissions as 
+they flow through the program. Newly created objects have one full permission for the entire 
+object state. As aliasing occurs, permissions are split according what access each reference needs. 
+Fractions [5] keep track of splits so that they can be joined after temporary aliasing. The flexibility 
+achieved with fractions was indispensable when specifying Java iterators [3], Splitting and joining 
+is handled transparently to the programmer. 
+
+In summary, contributions to reasoning about aliased objects include the following. (1) Dif¬ 
+ferent references can be constrained to modify orthogonal parts of the referenced object without 
+knowing about each other. This relates state spaces to data groups [24]. (2) An object’s state can be 
+partially fixed, giving shared and read-only permissions the ability to assume a state. (3) Objects 
+can depend in their invariants on all other objects, even read-only ones. (4) Under certain condi¬ 
+tions, a fixed state can be left later even if the object was previously aliased in the heap. We point 
+out that (1) and (2) directly leverage our hierarchical notion of state spaces in access permissions. 
+
+Benefits. By allowing object aliasing with permissions and relating objects using linear logic, 
+our approach can capture protocols involving object collaborations such as iterators [3] and stream 
+pipes (sect. 2). Clients and implementations can be checked for compliance to such protocols. 
+To our knowledge, existing typestate-based verification systems lack expressive power needed for 
+these protocols. Furthermore, our approach helped expose a way of breaking an internal invariant 
+of a frequently used class in the Java standard library, java . io . Buf f eredlnputStream. 
+
+Compared to global analyses [1, 20], our approach promises more scalability and less brit¬ 
+tleness. Since it operates modularly, it assists programmers like a compiler in using interfaces 
+correctly. At the same time we can handle arbitrary callbacks and open recursion, issues that are 
+difficult to handle in modular approaches. We can also verify correct usage and implementation of 
+dynamic state tests. Dynamic tests have received surprisingly little attention [8] considering how 
+common they are (e.g. for testing if a stream is open or a collection is empty). 
+
+Outline. The remainder of this paper is organized as follows. In the following section we 
+introduce our typestate specification approach. We give an overview of our formal verification 
+approach in section 3. Section 4 formally defines a object-oriented language with expressive type- 
+state specifications. We discuss protocol verification using this calculus in section 5. Section 6 
+
+
+3 
+
+
+
+close 
+
+
+[ open^diB^ 
+
+f closed^ 1 
+
+V J 
+
+i within^P^H 
+
+V J -1 
+
+f r\ ClOSl^T 
+
+v eof Ad 
+
+
+read 
+
+
+read>0 
+
+
+D 
+
+
+read=—1 
+
+
+Figure 1: Simple and refined input stream protocols 
+
+
+describes the problem in Buf f eredlnputStream that we found. Soundness of our approach 
+for a core fragment of specifications is proven in section 7. Section 8 compares our approach to 
+related work. We conclude in section 9. 
+
+
+2 Typestate Specifications 
+
+2.1 Protocols as State Machines 
+
+Typestates define protocols as state machines. For example, a simple model of an input stream 
+would have two states open and closed. The stream can be read as long as it is open (fig. 1). 
+Notice that states have an intuitive meaning even though their concrete names are irrelevant. 
+
+In an object-oriented language we can associate a class with such a state machine. States 
+express abstractly what conditions an object satisfies at a given time (e.g., it is “open”). They 
+respect object encapsulation because states do not correspond to concrete fields in an implementa¬ 
+tion. Methods can be specified with the state transitions they can perform (e.g., close transitions 
+from open to closed). In this approach, methods are specified independently from each other and 
+state transitions are reminiscent of traditional function types. This allows verifying typestate-based 
+protocol specifications in the manner of a type system. 
+
+2.2 State Refinements and Dimensions 
+
+Rather than defining the possible states of an object with a “flat” set of mutually exclusive states, 
+we model state spaces using dimensions and refinements [4] that loosely correspond to AND- and 
+OR-states in Statecharts [19]. 
+
+State refinement can be used to distinguish more fine-grained conditions within a state. For 
+example, we could refine open into two mutually exclusive states within and eof to distinguish 
+whether read returns a character or the “end of file” (EOF) token (fig. 1). The idea of state 
+dimensions is to separate independent aspects of object behavior. For example, Java input streams 
+can be “marked” and later “reset” to the marked position [4]. This is possible independently of 
+the stream’s current position. Thus dimensions obviate the need for “combination” states such 
+as “marked and within” and allow specifications to focus on dimensions of interest. Technically, 
+dimensions are just independent refinements that start from a root state called alive. At runtime, an 
+object will be in exactly one state in each applicable dimension. The state space of streams could 
+
+
+4 
+
+
+
+
+
+e.g. be specified as follows. Note that each dimension has a unique name. 
+
+stream = open, closed refines alive; 
+position = within, eof refines open; 
+mark = unmarked, marked refines open; 
+
+Subclasses inherit the superclass’s state space and are free to add their own refinements. This 
+conveniently ensures that states of subclasses always correspond to (possibly more coarse-grained) 
+states of superclasses [4]. Note that dimensions or states do not correspond to implementation 
+fields. Instead, state invariants tie field values to states (see sect. 4.4). 
+
+2.3 Access Permissions 
+
+A major complication in verifying protocol specifications is that different variables could alias the 
+same object. Care must be taken to keep the “views” of those aliases, i.e. what they assume about 
+the referenced object, consistent. 
+
+Our approach is to associate references with access permissions that are guaranteed to remain 
+consistent. A permission perm(x,n, A) grants different levels of access to a part n of the state 
+space (e.g., a state dimension) to a variable x. Permissions optionally carry additional information 
+A about the exact state inside the part of the state space they cover (omitted otherwise). We use 
+the following access levels. 
+
+• full permissions give exclusive right to can change state. 
+
+• share permissions give shared modifying access. Many share permissions may be around, 
+but no full permission. This is the de-facto access level in languages without aliasing control 
+such as Java or C#. 
+
+• pure permissions give read-only access. There may be other pure permissions and either 
+one full permission or several share permissions around. 
+
+For example, full (this, position, within) represents a full permission to change state in the po¬ 
+sition dimension of an input stream named this that is currently in the within state. Permissions to 
+different dimensions of the same object do not interfere and can therefore be used to independently 
+change in “their” dimensions. 
+
+As a technical device, we use fractions [5] to keep track of permission splitting. This lets us e.g. 
+“collect” all share permissions to regain a full permission. We usually omit fractions in examples 
+but sect. 4.3 will make fractions precise. Unlike in existing work [5], we use fractions not to fully 
+avoid interference but to keep permissions consistent and to allow temporary aliasing. 
+
+2.4 Linear Logic Specifications 
+
+As input streams illustrate we need considerable flexibility in specifying methods. In particular, it 
+is crucial to relate states of method receiver, arguments and results to each other and allow non- 
+deterministic behavior [4, 3]. Both are exhibited by the read method that can transition to within 
+or eof and indicates its choice by returning different values. 
+
+
+5 
+
+
+
+To achieve this expressiveness we specify methods with the decidable multiplicative-additive 
+fragment of linear logic [17] (MALL). Method pre- and post-conditions are separated with a linear 
+implication (—o) and use conjunction (0), internal choice (&), and external choice (0). 
+
+The following example specifies the read method for Java input streams. It requires a share per¬ 
+mission for the receiver’s open state. The post-condition on the right-hand side of the implication 
+is an external choice between conjunctions indicating that the caller has no influence on whether 
+read will return a character or EOF. 
+
+sha re (this, position) — o (result >00 shar e(this, open)) 
+
+© (result = -1 0 share (this, open, eof)) 
+
+For a more complex example, consider the “pipe” implementation in the Java I/O library [4]. A 
+pipe is created by connecting a PipedOutputStream (called “source”) to a PipedlnputStream 
+(called “sink”). Calling read on the sink will return the next character from a private buffer. The 
+source’s write method deposits characters into that buffer using the sink’s receive method. 
+
+The source signals that it is closed by invoking receivedLast on the sink. 
+
+Fig. 2 shows how the sink side of the pipe can be specified using our approach. (For simplicity, 
+we do not consider the sink as a subclass of InputStream here.) 
+
+Connecting the pipe (using the sink’s constructor) creates two shared permissions to the sink. 
+
+One is used by the source for calls to receive and is “consumed” by the sink when calling 
+receiveLast. Only then can the sink reach eof and join the two shared permissions (from the 
+source side and the sink’s client) to close the stream. We use explicit fractions (see sect. 4.3) to 
+ensure the presence of exactly two shared permissions. They allow us to permanently change the 
+sink’s state to closed even though it was previously aliased in the heap. To improve readability, 
+the explicit fractions needed for this example are expressed with half permissions that represent 
+share permissions with “half” (1/2) fractions as detailed in section 4. 
+
+Notice how different kinds of permissions with different assumptions, e.g. in read, close, 
+and isClosed, express design intent and allow aliasing: permissions capture what part of the 
+object’s state a method can affect. Aliasing is permitted because other permissions can exist while 
+a method executes. 
+
+The specification prevents several error conditions that cause runtime exceptions in the Java im¬ 
+plementation: (1) closing the sink before the source, (2) calling receive after receiveLast, 
+and (3) reading from a closed sink. 
+
+
+3 Verification Approach 
+
+In the remainder of the paper we formali z e sound modular verification of typestate specifications 
+based on access permissions for a core object-oriented language based on Featherweight Java (FJ, 
+[22]). This section summarizes our verification approach before the following sections go into 
+more detail. 
+
+A set of expression checking rules track state and permission changes. The rules are syntax- 
+directed up to reasoning about permission requirements for e.g. method calls. The intuition is that a 
+method body “guides” the search for a proof that the method’s post-condition can be satisfied from 
+
+
+6 
+
+
+
+class PipedlnputStream { 
+
+stream = open, closed refines alive; 
+
+position = within, eof refines open; 
+
+buffer = empty, nonEmpty refines within; 
+
+filling = partial, filled refines nonEmpty; 
+
+source = sourceOpen, sourceClosed refines nonEmpty; 
+
+public PipedlnputStream(PipedOutputStream src) : 
+full (m-, alive, raw) —o ha\\(this, open) © full (src, alive, open) 
+
+void close () : ha\\(this, open, eof) —o uri\c\ue(this, alive,closed) 
+
+boolean isciosed () : pu re(this, alive) -<3 ( result = true © pu re(this, alive, closed)) 
+
+© ( result = false © pur e(this, alive, open)) 
+
+int read () : shar e(this, open) —o ( result > 0 © share (this, open)) 
+
+© ( result = -1 © shar e(this, open, eof)) 
+
+void receive (int b) : ha\1(this, open) © b > 0 —o ha\1 (this, open, nonEmpty) 
+void receivedLast () : Ua\i(this, open) —o 1 
+
+} 
+
+
+Figure 2: Java PipedlnputStream protocol (simplified) 
+
+
+its pre-condition by telling the checker which implications (i.e. methods) to apply in which order. 
+Resource management, i.e. decisions about which permission to use when, is handled transparently 
+with linear logic reasoning. 
+
+Behavioral subtyping. A state space is associated with each class. Subclasses inherit state 
+spaces and can define additional state refinements. Overriding methods are free to define their 
+own specifications, e.g. by using more fine-grained states. We devise a simple check that ensures 
+behavioral subtyping [26] between overridden and overriding methods. 
+
+Primitive Booleans. Booleans are primitive and a conditional construct allows us to statically 
+distinguish outcomes of Boolean tests. This lets us encode dynamic state tests and statically rea¬ 
+son about their correct implementation. Typestates do not need a runtime representation in our 
+approach. Protocol compliance is fully guaranteed at compile time. 
+
+Let-normal form. We syntactically distinguish pure terms (in particular of Boolean type) from 
+expressions. Terms cannot affect permissions while expressions can. We require arguments of 
+atomic expressions (such as method calls) to be terms in order to simplify permission reasoning. 
+Results of expressions can be bound to fresh variables using a let construct. It can be used to 
+simulate recursive expressions [27, 8]. 
+
+Data groups. We map each field into a part of the class’s state space. Thus nodes in the state 
+space serve as data groups for object fields [24]. A modifying permission to a data group only 
+
+
+7 
+
+
+
+permits assignments to fields contained in it. 
+
+State invariants. State invariants define abstract typestates in terms of permissions to fields. For 
+example, a file-based stream, while open, could require a field to hold a valid file descriptor. Only 
+states within a field’s data group (and class) can depend on the field. State invariants serve as an 
+explicit abstraction function between class interface and implementation. They let us reason about 
+clients of a class fully separately from the class itself. They also let us verify that an implementation 
+is conforms to its interface. 
+
+Unpacking. Permissions are explicitly unpacked in order to gain access to fields [11]. Access is 
+granted according to state invariants implied by the permission’s state assumption. Full and shared 
+permissions grant modifying access while pure permissions grant read-only access to fields. Be¬ 
+cause of inheritance, only permissions to the method receiver can be unpacked. After manipulating 
+fields, objects can be re-packed into a potentially different state. 
+
+Intermediate packing. The receiver must be fully packed before method calls. This guarantees 
+that objects are consistent in case of a callback. This is not a strong restriction because the object 
+can always be packed to an intermediate state. But it lets us enforce that only one permission is 
+unpacked at any time, allowing us to apply focus [12] when unpacking shared permissions. Note 
+that we could avoid intermediate packing in the absence of callbacks. 
+
+Frame permissions. Objects are compartmentalized into frames [11]. Each frame corresponds 
+to a class in the object’s subclass hierarchy. The frame corresponding to the object’s runtime type 
+is called virtual frame. We associate each frame with a separate frame permission. A frame’s 
+abstract typestate can only depend on fields defined in the same frame and the abstract state of the 
+inherited frame. 
+
+Open recursion. A frame permission to an object’s virtual frame is called object permission. 
+Frame permissions are needed for unpacking and statically dispatched calls while object permis¬ 
+sions are needed for dynamic dispatch. Dynamic dispatch can treat object permissions (to the 
+receiver) as frame permissions (to the virtual frame). This only requires methods to be overridden 
+as in Fugue [11] if they need frame permissions but overriding is not required for methods that 
+only need object permissions. 
+
+Soundness. Intuitively, for every permission we maintain the invariant that the statically tracked 
+state assumption is a sound approximation of the referenced object’s runtime state (unless it is 
+unpacked). While an object is unpacked we ensure that field assignments do not affect other 
+permissions. Packing brings the object into a new state that is soundly approximated by other 
+permissions. Since at most one object is unpacked at any time we are guaranteed that objects are 
+consistent with the permission that is used for unpacking them. Using these intuitions, we prove 
+soundness of a core language fragment in section 7. 
+
+
+4 Formal Language 
+
+4.1 Syntax 
+
+Fig. 3 shows the syntax of a simple class-based object-oriented language. The language is inspired 
+by Featherweight Java (FJ, [22]); we will extend it to include typestate protocols in the following 
+
+
+8 
+
+
+
+programs 
+
+PR : 
+
+:= {CL, e) 
+
+
+class decl. 
+
+CL : 
+
+:= class C extends C' { F R I N M } 
+
+I, N in fig. 5 
+
+field decl. 
+
+F : 
+
+:= / : T in n 
+
+
+method decl. 
+
+M : 
+
+:= T m(T x) : MS = e 
+
+MS in fig. 5 
+
+refinements 
+
+R : 
+
+:= d = s ref ines s 0 
+
+
+terms 
+
+t 
+
+:= x ] l | true false 
+
+atoms 
+
+
+
+ti and f 2 1 1 or t 2 not t 
+
+connectives 
+
+expressions 
+
+e 
+
+:= t | / | assign / := t 
+
+terms, fields 
+
+
+
+new (7(f) to.m(t) super. m(t) 
+
+construction, calls 
+
+
+
+if(f, ei,e 2 ) let x = e± in e 2 
+
+condition, binding 
+
+values 
+
+V 
+
+:= l true false 
+
+
+references 
+
+r 
+
+:= x | / | l 
+
+
+types 
+
+T 
+
+:= C bool 
+
+
+nodes 
+
+n : 
+
+:= s \ d 
+
+
+
+classes C 
+locations l 
+
+
+fields f 
+states s 
+
+
+variables x methods m 
+dimensions d 
+
+
+Figure 3: Base language syntax 
+
+
+subsections. We identify classes ( C ), methods (m), and fields (/) with their names. We use an 
+overbar notation to abbreviate a list of elements. For example, x : T = xp.Ti, ..., x n :T n . Types 
+(T) in our system include Booleans (bool) and classes. 
+
+Programs are defined with a list of class declarations and a main expression. A class decla¬ 
+ration CL gives the class a unique name C and defines its fields, methods, typestates, and state 
+invariants. A constructor is implicitly defined with the class’s own and inherited fields. Fields (F) 
+are declared with their name and type. Each field is mapped into a part of the state space n that can 
+depend on the field (details in sect. 5.2). A method (M) declares its result type, formal parameters, 
+specification and a body expression. State refinements R will be explained in the next section; 
+method specifications MS and state invariants N are deferred to sect. 4.4. 
+
+We syntactically distinguish pure terms t and possibly effectful expressions e. Arguments 
+to method calls and object construction are restricted to terms. This simplifies reasoning about 
+effects [27, 8]. A translation from a more conventional syntax with recursive expressions into our 
+let-normal form is straightforward. Notice that neither field access nor assignment are prefixed 
+with a term. This syntactically restricts field access and assignment to fields of the receiver class. 
+Explicit “getter” and “setter” methods can be defined to give other objects access to fields. We 
+define the result of an assignment to be the previous field value. 
+
+
+9 
+
+
+
+
+
+
+
+class C extends C' { F R ... } refinements^') = R' 
+refinements(Object) = • refinements(C) = R!,R 
+
+n in refinements(C) c b A x wf C b A 2 wf C b A x wf # A 2 C h A 2 wf 
+Chnwf C b Ai © A 2 wf C b Ai <© A 2 wf 
+
+= s ref ines s e refinements(C) Chnwf ghw< n" C b n" < n' 
+
+C b Si < d C b d < s C b n < n C b n < n' 
+
+d — s refines s* g refinements(C) d' = ~s i refines s* g refinements(C) d ± d! 
+
+C b d # d! 
+
+C h m < n[ Chni# n 2 Chn 2 < n' 2 C \- A' # A C b A 1i2 # A 
+
+C b Tii H 1 n 2 C \~ A ^ A’ C \~ A\ ® A2 A 
+
+C b A 1;2 # A C\~ n! <n C b A l2 An C b Ax ( 8 ) A 2 wf 
+C b Ai © A2 # A C b n' A n C b Ai © A2 -< n 
+
+C b An C b Ai © A 2 wf C b d ^ n Vn' : b b A ^ n' implies n < n! 
+
+C \- A\® A 2 -< n b b A C n 
+
+
+Figure 4: State space judgments 
+
+
+4.2 State Spaces 
+
+State spaces are formally defined as a list of state refinements (see fig. 3). A state refinement ( R ) 
+refines an existing state in a new dimension with a set of mutually exclusive sub-states. We use s 
+and d to range over state and dimension names, respectively. A node n in a state space can be a 
+state or dimension. State refinements are inherited by subclasses. We assume a root state alive that 
+is defined in the root class Object. 
+
+We define a variety of helper judgments for state spaces in fig. 4. refinements(C) determines 
+the list of state refinements available in class C. C b A wf defines well-formed state assumptions. 
+Conjunctive assumptions have to cover orthogonal parts of the state space, b b n < v! defines the 
+substate relation for a class. C b A # A' defines orthogonality of state assumptions. A and A' are 
+orthogonal if they refer to different (orthogonal) state dimensions. C b A A n defines that a state 
+assumption A only refers to states underneath a root node n. C b A <C n finds the tightest such n. 
+
+4.3 Access Permissions 
+
+Access permissions p give references permission to access an object. Permissions to objects are 
+uniformly represented with access(r, n, g. k, A) (fig. 5). (For simplicity, we omitted g and k in 
+section 2.) The components have the following meaning. 
+
+• Permissions are granted to references r. References can in general be variables, locations, 
+
+
+10 
+
+
+
+and fields (of the current receiver object) that are defined in the current scope. 
+
+• Permissions apply to a particular subtree in the space space of r. The subtree is identified 
+by its root node n. The root node is a state or dimension defined in C. Other parts of the 
+state space are unaffected by the permission. The type system can always assume that the 
+referenced object is in state n. 
+
+• The fraction function g tracks for each node on the path from n to alive a symbolic fraction 
+[5]. The fraction function keeps track of how often permissions were split at different nodes 
+in the state space so they can be coalesced later (see sect. 5.5). 
+
+• The subtree fraction k encodes the level of access granted by the permission, k > 0 grants 
+modifying access, k < 1 implies that other potentially modifying permissions exist. Frac¬ 
+tion variables range over fractions strictly greater than 0. The different access levels are 
+summarized in the following table. 
+
+
+Access level 
+
+This permission 
+
+Other permissions 
+
+Subtree Fraction 
+
+full 
+
+exclusive modifying access 
+
+only read-only 
+
+k = 1 
+
+share 
+
+shared modifying access 
+
+modifying and read-only 
+
+0 < k < 1 
+
+pure 
+
+read-only access 
+
+modifying and read-only 
+
+k = 0 
+
+
+• An optional state assumption A expresses additional state knowledge within the permis¬ 
+sion’s subtree. Modifying permissions can be used to change the current state within the 
+permission’s subtree. If other modifying permissions exist then the state assumption is tem¬ 
+porary , i.e. lost on any effectful expression (because the object’s state may change without 
+the knowledge of r). Thus only full permissions can permanently make state assumptions 
+until they modify the object’s state themselves. If no state assumption is given then the object 
+is still guaranteed to be in state n. 
+
+As mentioned above, the subtree fraction k lets us recover our original three permission kinds 
+that we write as full, share, and pure. They can be encoded as follows. Note that this equates 
+full (r, n, g, A) = share(r, n, g, 1, A) which conforms with our intuition. 
+
+access(r, n, g, 1, A) = full (r,n,g,A) 
+
+access (r, n, g, k, A) = share(r, n, g, k, A) (k f 0) 
+
+access(r, n, g, 0, A) = pur e(r,n,g,A) 
+
+4.4 Permission-Based Specifications 
+
+Objects often dependent on each other. For example, we want to be able to express that an object 
+is in a particular state only if a Boolean value is true. Since permissions act as linear resources we 
+use a decidable subset of linear logic connectives to relate multiple objects (fig. 5). 
+
+The atoms of our predicate language are the permissions p and facts q about Boolean values. 
+Facts about values have the same role as state information about objects although state information 
+
+
+11 
+
+
+
+permissions 
+
+p : 
+
+:= access (r,n,g,k,A) 
+
+access perm. 
+
+facts 
+
+q 
+
+:= t — true t = false 
+
+boolean values 
+
+assumptions 
+
+A 
+
+:= n | A 1 © A 2 | A\ © A 2 
+
+node, conj., disj. 
+
+fraction fct. 
+
+9 
+
+:= z | n 1 —>• v 
+
+variable, mapping 
+
+
+
+1 9 / 2 1 9^92 
+
+split, extension 
+
+fractions 
+
+k 
+
+:= 1 | 0 | z | lfc/2 
+
+full, zero, variable, split 
+
+predicates 
+
+P 
+
+:= P \ q 
+
+permissions, facts 
+
+
+
+1 Pl©p 2 1 1 
+
+conjunction 
+
+
+
+1 P 1 &P 2 ! T 
+
+internal choice 
+
+
+
+Pi © P 2 | 0 
+
+external choice 
+
+
+
+3z : H.P | \/z : H.P 
+
+fraction quantification 
+
+method specs 
+
+MS 
+
+:= P-^E 
+
+
+expr. types 
+
+E 
+
+:= 3x : T.P 
+
+
+state inv. 
+
+N 
+
+:= n — P 
+
+
+initial state 
+
+I 
+
+\= initially (3/: T.P, Si © 
+
+... © s n ) 
+
+fraction terms 
+
+h 
+
+:= g \ k 
+
+
+fraction types 
+
+H 
+
+:= Fract n —> Fract 
+
+value, function 
+
+fraction vars. 
+
+z 
+
+
+
+
+Figure 5: Permissions, predicates, and specifications 
+
+
+A changes over time while facts q remain true. These atoms can be combined with the linear 
+operators multiplicative conjunction ((g)), additive conjunction (&), and additive disjunction (©). 
+We also include existential (3z : H.P ) and universal quantification of fractions (Vz : H.P ) into our 
+permissions. Quantification of fractions alleviates the programmer from writing concrete fraction 
+functions in most cases. We will use an existential quantification over types to type all expressions 
+(E). 
+
+Method specifications. Methods are specified with a linear implication (—o) of predicates 
+(MS). This captures the intuition that a method “takes” a number of permissions and returns 
+potentially different permissions. The left-hand side of the implication (essentially the method 
+pre-condition) may refer to method receiver and formal parameters. The right-hand side (post¬ 
+condition) existentially quantifies the result (a similar technique is used in Vault [10]). We always 
+refer to the receiver with this and usually call the return value result. 
+
+State invariants. We also use predicates to define state invariants. State invariants were pro¬ 
+posed in Fugue [11] as a generalization of class invariants. We decided to use linear logic predicates 
+for state invariants as well (N). In general, several of the defined state invariants will have to be 
+satisfied at the same time. This is due to the hierarchical nature of the state space and the exis¬ 
+tence of orthogonal state dimensions. Usually, state invariants will use existential quantification to 
+abstract from concrete fraction functions. Each class declares an initial state as a conjunction of 
+states (I). It must be established during object construction. 
+
+
+12 
+
+
+
+
+
+
+
+4.5 Handling Inheritance 
+
+Specifications of object behavior are usually not oblivious to inheritance, and our approach is no 
+exception. One of the problems is that each class in a class hierarchy defines its own fields and 
+manipulates them. Fugue proposed to compartmentalize objects into frames [11]. Each frame 
+corresponds to a class in the object’s class hierarchy. 
+
+Unlike state refinements, state invariants are not inherited by subclasses. Separate state invari¬ 
+ants for each class let us associate separate typestates with each frame. The state of the “virtual” 
+frame (that corresponds to the runtime type of the object) represents the overall state of the object. 
+Fugue essentially forced all frames of an object to be in the same typestate. Moreover, all methods 
+had to be overridden by all subclasses. Calls to super were possible and essentially required in 
+order to keep frame typestates consistent. 
+
+Following previous work we allow subclasses to explicitly express their expectations of the 
+super-frame’s state, thereby decoupling typestates of different frames. This is for example neces¬ 
+sary for defining a buffered stream as a subclass of a “filter” that forwards calls to an “underlying” 
+stream, as implemented in the Java I/O library [4]. The filter’s state is always the same as the 
+underlying stream’s. But the buffered input stream caches characters internally and can therefore 
+still be in state within while the inherited filter is already eof. 
+
+In order to realize this idea we allow the specification of permissions for super in state in¬ 
+variants. State invariants can refer to fields defined in the current class and typestates of the imme¬ 
+diately extended class. Thus all fields are “private” to a class frame. 
+
+references r :: = ... | super j thisf r super frame, this frame 
+
+Thus permissions actually give access to a particular frame. The object permissions we defined 
+in sect. 4.3 are permissions to the “virtual frame”. They can be used for “entering” an object 
+through a dynamically dispatched call. In method specifications we distinguish permissions for 
+the receiver’s “current” frame with thisf r from normal permissions. 
+
+Only methods that require frame permissions have to be overridden; this lets us treat object 
+permissions as frame permissions in dynamically dispatched calls. Permissions for the receiver’s 
+current frame are needed for methods that access fields. If a method merely forwards calls then 
+it only needs object permissions and need not be overridden. 1 We believe that this distinction 
+significantly reduces overriding burden. 
+
+4.6 Behavioral Subtyping 
+
+Subclasses should be allowed to define their own specifications, e.g. to add precision or support 
+additional behavior [4]. However, subclasses need to be behavioral subtypes [26] of the extended 
+class. Our system enforces behavioral subtyping in two steps. Firstly, state space inheritance con¬ 
+veniently guarantees that states of subclasses always correspond to states defined in superclasses 
+[4]. Secondly, we make sure that every overriding method’s specification implies the overridden 
+
+'A call can be forwarded to an argument or to the receiver itself. The latter occurs when base class methods 
+implement functionality in terms of other methods. 
+
+
+13 
+
+
+
+(z : H) € r _ _ r F k : Fract 
+
+r I- z : H r h 1 : Fract r h 0 : Fract T F k/2 : Fract 
+
+r F k : Fract (k ^ 0 ) rhj:n^ Fract r F g : n —>• Fract r F : n 7 —> Fract 
+r h nnfc : fi —► Fract T F g/ 2 : n —> Fract Fract 
+
+Figure 6: Fraction typing 
+
+r h r : C 
+
+rhg: up c (n) —> Fract ThF Fract 
+r F access(r, n, g, k, A) Permission 
+
+Figure 7: Well-formed permissions 
+
+method’s specification [4] using the override judgment (fig. 10) that is used in checking method 
+declarations (fig. 9). This check leads to method specifications that are contra-variant in the domain 
+and co-variant in the range as required by behavioral sub typing. 
+
+5 Modular Typestate Verification 
+
+5.1 Permission Tracking 
+
+This section shows how we check method implementations against the permission-based specifi¬ 
+cations introduced in the last section. What we describe here is a modular static typestate checking 
+technique that allows us to guarantee at compile-time that the behavioral specifications of a pro¬ 
+gram will never be violated at runtime. We emphasize that our approach does not require tracking 
+typestate s at run time. 
+
+We permission-check an expression e with the judgment T; A \- l c e : : T.P \ S. This is 
+
+read as, “in valid context V and linear context A, an expression e executed within receiver class 
+C produces an object of type T and permissions P and affects fields in £”. The permissions in 
+A are consumed in the process. We omit the receiver C where it is not required for checking a 
+particular syntactic form. The set £ keeps track of fields that were assigned to, which is important 
+for the correct handling of permissions to fields. It is omitted when empty. The marker i in the 
+judgment can be 0 or 1 where i — 1 indicates that states of objects in the context may change 
+during evaluation of the expression. This will help us reason about temporary state assumptions. 
+A combination of markers with i V j is 1 if at least one of the markers is 1. 
+
+valid contexts T ::= • | T, x : T \ T, z : H \ T, l : C \ T, q 
+
+linear contexts A ::= • | A ,P 
+
+effects £ ::= • | £,f 
+
+
+14 
+
+
+
+
+
+(x : T) e r 
+V \~ x :T 
+
+
+T-Var 
+
+
+{i:C)e r 
+r b / : c 
+
+
+T-LOC 
+
+
+T b true : bool 
+
+
+T-True 
+
+
+T b false : bool 
+
+
+T-False 
+
+
+T b t\ : bool r ht 2 : bool 
+T b t\ and f 2 : bool 
+
+
+T-And 
+
+
+T b t\ : bool r ht 2 : bool 
+T b t\ or f 2 : bool 
+
+
+T-Or 
+
+
+r Ft : bool 
+T b not f : bool 
+
+
+T-NOT 
+
+
+r b t: C C extends C 
+r bi: C 
+
+
+T-Sub 
+
+
+Figure 8: Term typechecking 
+
+
+Valid and linear contexts distinguish valid (permanent) facts (T) from resources (A). Resources 
+are tracked linearly, forbidding their duplication, while facts can be used arbitrarily often. (In 
+logical terms, contraction is defined for facts only). The valid context types object variables, 
+fraction variables, and location types and keeps track of facts about terms q. Fraction variables 
+are tracked in order to handle fraction quantification correctly. The linear context holds currently 
+available resource predicates. 
+
+Fractions and fraction functions are formally typed in figure 6. Note that fraction function types 
+keep track of exactly which nodes are mapped. We use this to check that the fraction function of 
+a permission covers exactly the nodes between (and including) the permission’s root node and the 
+state space root alive. Fraction typing lets us define permission validity (figure 7 
+
+The judgment T b t : T types terms (figure 8). It includes the usual rule for subsumption using 
+nominal subtyping induced by the extends relation. Term typing is used in expression checking. 
+
+Our expression checking rules are syntax-directed up to reasoning about permissions. Permis¬ 
+sion reasoning is deferred to a separate judgment T; A b P that uses the rules of linear logic to 
+prove the availability of permissions P in a given context. This judgment will be discussed in 
+sect. 5.5. Permission checking rules for most expressions appear in fig. 9 and are described in 
+turn. Packing, method calls, and field assignment are discussed in following subsections. Helper 
+judgments are summarized in fig. 10. The notation [t/r]e substitutes t for occurrences of r in e. 
+
+• P-Term embeds terms. It formali z es the standard logical judgment for existential introduc¬ 
+tion and has no effect on existing objects. 
+
+• P-Field checks field accesses in a similar way to P-Term. 
+
+• P-New checks object construction. The parameters passed to the constructor have to satisfy 
+initialization predicate P and become the object’s initial field values. The new existentially 
+quantified object is associated with a full permission to the root state (with full fraction) that 
+makes state assumptions according to the declared start state A. Object construction has no 
+effect on existing objects. 
+
+
+15 
+
+
+
+T \~ t : T T-Ah[t/x]P 
+T; A h° t : 3x : T.P 
+
+
+P-Term 
+
+
+localFields(C) — f :T T- Ah [f l /x}P 
+I': A : :.r : 1 ).!’ 
+
+
+P-Field 
+
+
+rh f.T init(C) = (3/ : T.P, A) r ; AI- \t/f\P _ 
+
+T; A h° new C(t) : 3x : CM\{x, alive, {alive i-> l}, A) 
+
+(r, t = true); A \~ l e\ : 3a; : T.P\ \ £\ 
+r h t : bool (r, t = false); A M e 2 : 3a; : T.P 2 \ £ 2 
+
+r ; A \- iv i if (t, e u e 2 ) : 3a; : T.P\ ®P 2 \S l US 2 ? ' lF 
+
+r ; APei :3x:T.P\Si (r, x : T); (A', P) M e 2 : E 2 \ S 2 
+i = 1 implies no temporary assumptions in A' Fields £\ do not occur in A' 
+
+T; (A, A') let x — e\ in e 2 : E 2 \ Si U E 2 
+
+
+(x : T, this :C);fP c e: 3 result: T r .P r (£)T \ £ E 
+override(m, C,Vx : T.P —o E) 
+
+T r m(T x) : P —° E = e ok in C 
+
+
+3result: T r .P r 
+- P-METH 
+
+
+M ok in C M overrides all methods with frame permissions in C' 
+class C extends C ; {FRINMjok 
+
+
+P-Class 
+
+
+CL Ok -;-P e:E\£ 
+(CL, e) : E 
+
+
+P-Prog 
+
+
+Figure 9: Permission checking for expressions (part 1) 
+
+
+The judgment i nit (fig. 10) yields initialization predicate and initial state for a class. The start 
+state is a conjunction of states (fig. 5). The initialization predicate is the invariant needed for 
+the start state. 
+
+• P-If introduces non-determinism into the system, reflected by the disjunction in its type. We 
+make sure that the predicate is of Boolean type and then assume its truth in checking the then 
+branch (ei). Similarly, we assume the falsehood of the predicate in checking the else branch 
+(e 2 ). This approach lets branches make use of the conditional. 
+
+• P-Let checks a let binding. Since variables are terms, let can be used to bind new ob¬ 
+jects, fields, or method results in subsequent expressions. The linear context used in check¬ 
+ing the second subexpression must not contain permissions for fields affected by the first 
+expression. This makes sure that old permissions to fields do not “survive” assignments and 
+packing. Moreover, temporary state information are dropped if the first subexpression has 
+side effects. 
+
+
+16 
+
+
+
+A program consists of a list of classes and a main expression (P-Prog, fig. 9). As usual, 
+the class table CL is globally available. The main expression is checked with initially empty 
+contexts. The judgment CL ok (P-Class) checks a class declaration. It checks fields, states, 
+and invariants for syntactic correctness (omitted here) and verifies consistency between method 
+specifications and implementations using the judgment M ok in C. P-Meth assumes the specified 
+pre-condition of a method (i.e. the left-hand side of the linear implication) and verifies that the 
+method’s body expression produces the declared post-condition (i.e. the right-hand side of the 
+implication). Conjunction with T drops excess permissions, e.g. for garbage-collected objects. 
+Notice that a method itself is not a linear resource since all resources it uses (including the receiver) 
+are passed in upon invocation. 
+
+5.2 Packing and Unpacking 
+
+We use a refined notion of unpacking [11]: we unpack and pack a specific permission. Unpacking 
+a permission gives access to the part of the object covered by that permission. The access we gain 
+to fields reflects the kind of permission we unpacked. Full and shared permissions give modifying 
+access, while a pure permission gives read-only access to underlying fields. 
+
+To avoid inconsistencies, objects are always fully packed when methods are called. Thus at 
+any given time, only one method can unpack an object. To further simplify the situation, only 
+one permission can be unpacked at the same time. Intuitively, this approach “focuses” [12] on the 
+permission being unpacked. This lets us improve usability of share permissions by unpacking 
+them like full permissions, gaining full rather than shared access to underlying fields (if available). 
+The syntax for packing and unpacking is as follows. 
+
+expressions e ::= ... | unpack (n, k. A) in e unpacking 
+
+pack n to A in e packing 
+
+Packing and unpacking always affects the receiver of the currently executed method. The 
+parameters to packing and unpacking express the programmer’s expectations about the permission 
+she is unpacking. In particular, n denotes the subtree in the state space the permission should cover. 
+A are the assumptions about states within that subtree that need to be satisfied. For simplicity, an 
+explicit subtree fraction k is part of packing expressions. It could be inferred from a programmer- 
+provided permission kind like “share”. 
+
+In order for pack to work properly we have to “remember” the permission we unpacked. 
+Therefore we introduce unpacked as an additional linear predicate. 
+
+permissions p ::= ... j unpacked (n,g,k,A) 
+
+The checking rules for packing and unpacking are given in fig. 11. Notice that packing and 
+unpacking always affects permissions to thisf r , the frame of the receiver in which the surrounding 
+method is defined. (We ignore substitution of this with a location at runtime here.) P-Unpack 
+first derives the permission to be unpacked. The helper judgment inv determines a predicate that 
+describes the receiver’s fields based on the permission being unpacked. It is used for checking the 
+
+
+17 
+
+
+
+body expression e. An unpacked predicate is added into the linear context that lets field assign¬ 
+ments and packing work correctly. We can prevent multiple permissions from being unpacked at 
+the same time using a straightforward dataflow analysis [9] (omitted here). 
+
+P-Pack does the opposite of P-Unpack. It derives the field predicate necessary for packing 
+the given permission and then assumes that permission in checking the body expression. Notice 
+how P-Pack verifies that the receiver was unpacked before. The state assumption A can differ 
+from before only if a modifying permission was unpacked. Finally, the rule ensures that field 
+permissions do not “survive” packing. 
+
+Invariant transformation. The judgment invc(n, g, k. A) essentially determines what it means 
+to possess an atomic permission access(t/iAf r , n, g, k, A) for an object of (runtime) class C. It is 
+defined in fig. 12. It uses the purify function (fig. 13) that converts all atomic permissions into pure 
+permissions. Unpacking a full or shared permission with root node n yields purified permissions 
+for nodes “above” n and includes invariants following from state assumptions as-is. Conversely, 
+unpacking a pure permission yields completely purified permissions. 
+
+Example: Dynamic State Tests. A dynamic state test for a state s is a method with a type like 
+Mg : alive — Fract.pure(this, alive, g) —o 3 b : bool. (b = true <g) pure(this,alive, g,s)) © 
+( b = false ®pure(this, alive, g, s')) that can be implemented as follows. This example makes 
+the simplifying assumption that the object contains a Boolean field flag that is true iff the object is 
+in state 5. 
+
+
+unpack(alive, 0, alive) in let x = flag in 
+
+if(x,pack alive to s in true,pack alive to s' in false) 
+
+5.3 Calling Methods 
+
+We distinguish virtual calls and calls to inherited methods. Checking any method call expression 
+involves proving the method’s pre-condition. The expression is typed with the corresponding post¬ 
+condition. Unfortunately, calling a method can result into callbacks. In order to ensure that objects 
+are always consistent when called we require them to be fully packed before method calls. This 
+can be ensured with a simple dataflow analysis [9]. 
+
+While this rule may seem unnatural at first, it reflects that aliased objects have to be prepared 
+for callbacks. Note that the packing requirement is not a strong limitation. We can always pack 
+to some intermediate state. Moreover, intermediate packing removes the need for adoption as in 
+existing work [12]. Instead, the intermediate state represents the situation where an adopted object 
+was taken out of the adopting object. Inferring intermediate states as well as identifying where 
+callbacks are impossible are areas for future research. 
+
+Virtual calls. Virtual calls are dynamically dispatched (rule P-Call). In virtual calls, frame 
+and object permissions are identical because object permissions simply refer to the object’s virtual 
+frame. This is achieved by substituting the receiver for both this and lhis\ ( . 
+
+Super calls. Super calls are statically dispatched (rule P-Super). We substitute super only 
+for thisir. Recall that super is used to identify permissions to the super-frame. We omit a substi¬ 
+tution of this for the receiver ( this again) for clarity. 
+
+
+18 
+
+
+
+5.4 Field Assignments 
+
+Assignments to fields change the state of the receiver’s current frame. We point out that assign¬ 
+ments to a field do not change states of objects referenced by the field. Therefore reasoning about 
+assignments mostly has to be concerned with preserving invariants of the receiver. Again, un¬ 
+packed predicates help us with this task. 
+
+Our intuition is that assignment to a field requires unpacking the surrounding object to the point 
+where all states that refer to the assigned field in their invariants are revealed. Notice that the object 
+does not have to be unpacked completely in this scheme. For simplicity, each field is annotated 
+with the subtree that can depend on it. Thus we interpret subtrees as data groups [24], and every 
+field is mapped into one of them. 
+
+The rule P-ASSIGN (fig. 11) assigns a given object t to a field f, and returns the old field value 
+as an existential x'. This preserves information about that value. It verifies that the new object is of 
+the correct type and that a suitable full or share permission is currently unpacked. By recording an 
+effect on we ensure that information about the old field value cannot flow around the assignment 
+(which would be unsound). 
+
+5.5 Permission Splitting and Joining 
+
+Our permission checking rules rely on the ability to prove a permission with the current resources, 
+written T; A h P (figure 14). We use standard rules for the multiplicative-additive fragment 
+of linear logic (MALL) with quantifiers that only range over fractions. This fragment has been 
+proven decidable [25]. Following Boyland [6] we add a rule Subst that introduces a notion of 
+substitution into the logic. It allows to substitute a set of linear resources with an equivalent one. 
+
+T; A b P' P' ee> P 
+
+r ; a i- p - SuBST 
+
+The judgment P ^ P' defines legal transformations similar to a subtyping judgment in con¬ 
+ventional type systems. We use substitutions for splitting and joining permissions with the rules 
+shown in fig. 15. The symbol <©©• indicates that transformations are allowed in both directions. 
+We explain each rule in turn. 
+
+Sym symmetrically splits a permission into two equivalent permissions. Notice how fractions 
+are split. As YM asymmetrically splits a pure permission off a given permission. Here, the subtree 
+fraction k is untouched, reflecting the asymmetric split. Both transformations can be inverted. 
+
+F-Split-® splits a full permission with a conjunctive state assumption into a conjunction of 
+full permissions. F-JoiN-(g) inverts F- SPLIT-® but requires the fraction on the new root node to 
+be 1. This guarantees that no additional full or shared permissions exist in the new permission’s 
+subtree. F-© splits and conjoins full permissions with a disjunction of state assumptions. Since 
+only one of the two state assumptions can be true at a given time we do not need to split fractions. 
+
+F-Down limits a full permission to a smaller subtree by moving the root node down in the 
+state space. The fraction function is appended with additional 1 fractions for nodes that are above 
+the moved root. Notice that this operation is only allowed if any state assumptions of the original 
+permission can be preserved. F-Up does the opposite but like F-JOIN-® it requires the fraction on 
+
+
+19 
+
+
+
+the new root node to be 1. Similarly, P-Up can be used to weaken a pure permission by moving its 
+root up in the state space. Finally, Forget allows a permission to “forget” its state assumption. 
+This rule is used to drop temporary state assumptions. 
+
+Our splitting and joining rules will maintain a consistent set of permissions for each object. 
+Permissions to a subtree in the state space of a runtime object are consistent if there exists at most 
+one full permission and an arbitrary number of pure permissions to the subtree. Moreover, an 
+arbitrary number of share permissions is allowed to exist if and only if no full permission exists. 
+Fractions k of all permissions to the subtree must sum up to (at most) 1. Furthermore, all other 
+permissions to the object refer to parts of the state space that are orthogonal to the subtree (e.g. in 
+a different state dimension). Finally, fraction functions of all permissions to an object sum up to 
+(at most) 1. 
+
+
+6 Breaking an Invariant in Java Buffered Input Streams 
+
+To illustrate how verification proceeds, figure 16 shows a simplified version of the fill method in 
+java . io . Buf f eredlnput St ream written in our core language. Buf f eredlnputStream 
+buffers characters from an underlying stream to make reading more efficient. In Sun’s current Java 
+standard library implementation (Java 5 and 6), f 111 is responsible for retrieving more characters 
+from the underlying stream if its character buffer is depleted. 
+
+As can be seen we need an intermediate state reads and a marker field reading that indicate 
+an ongoing call to the underlying stream. We also need an additional state refinement to specify 
+the internal methods that implement reading from the underlying stream. (We assume that this\ r 
+permissions can be used for calls to private methods.) 
+
+Maybe surprisingly, we have to re-assign field values after super, read () returns. The 
+reason is that when calling super we loose temporary state information for this. Assignment 
+re-establishes this information and lets us pack properly before calling doFill recursively or 
+terminating in the case of a full buffer or a depleted underlying stream. 
+
+It turns out that these re-assignments are not just an inconvenience in our method but point to 
+a real problem in the Java standard library implementation. It is possible to break an invariant in 
+Buf f eredlnput St ream through a reentrant callback. In a nutshell, if an underlying stream 
+calls back into the buffer to read then the following happens: 
+
+1. The underlying stream is called again, potentially overriding buffer content. If the underlying 
+stream keeps calling back then the program goes into an infinite loop. 
+
+2. The second call into read advances the buffer’s pos field to pos > 0. Later, the buffer’s 
+count field will be set as pos + buffer.length, thereby violating the invariant that count < 
+buffer.length. Ultimately, the buffer will try to read behind the end of its buffer array, causing 
+an undocumented ArraylndexOutOfBoundsExcept ion. 
+
+The following implementation of an underlying stream exposes this problem (tested with Java 
+6, build 1.6.0_bl05, and two versions of Java 5). 
+
+
+20 
+
+
+
+package test.java.io; 
+
+
+import java.io.IOException; 
+import java.io.InputStream; 
+import java.io.ButferedlnputStream; 
+
+/ * * 
+
+* @author Kevin Bierhoff 
+
+* 
+
+* / 
+
+public class MaliciousStream extends InputStream { 
+
+private ButferedlnputStream loop; 
+private int callCount = 0; 
+
+public MaliciousStream() { 
+
+super(); 
+
+} 
+
+@Override 
+
+public int read() throws IOException { 
+
+// never called 
+return -1; 
+
+} 
+
+©Override 
+
+public int read(byte b[], int off, int len) throws IOException { 
+int calls = ++callCount; 
+if(calls < 2) { 
+
+System.out.println("Recursive read: " + loop.read()); 
+
+} 
+
+System.out.println ("Fill " + calls + " to " + 
+
+b.hashCode() + "[" + off + ".." + (off+len) + "]"); 
+
+if (b [0] != 0) 
+
+System.out.println("Overriding content"); 
+for(int i = off; i < off + len; i++) { 
+
+b[i] = (byte) (calls & OxFF); 
+
+} 
+
+return len; 
+
+} 
+
+public void setLoop(BufferedlnputStream loop) { 
+
+
+21 
+
+
+
+} 
+
+
+this.loop = loop; 
+
+
+public static void main(String[] args) { 
+
+MaliciousStream h = new MaliciousStream(); 
+
+ButferedlnputStream b = new ButferedlnputStream(h); 
+h.setLoop(b); 
+
+int i = 0; 
+try { 
+
+int c, oldc = -1; 
+for(; i < 30000; i + + ) { 
+
+c = b.read(); 
+if(c != oldc) { 
+
+System.out.println("Character " + i + 
+
+" switches to " + c); 
+oldc = c; 
+
+} 
+
+} 
+
+} 
+
+catch (Exception e) { 
+
+System.err.println("Exception in iteration " + i) ; 
+e.printStackTrace(); 
+
+} 
+
+} 
+
+} 
+
+
+Running the m a i n method will terminate the program withanArraylndexOutOfBoundsException 
+and produce the following output: 
+
+Fill 2 to 17523401 [0..8192] 
+
+Recursive read: 2 
+
+Fill 1 to 17523401 [0..8192] 
+
+Overriding content 
+Character 0 switches to 1 
+Exception in iteration 8191 
+
+java.lang.ArraylndexOutOfBoundsException: 8192 
+
+at java.io.BufferedlnputStream.read(BufferedlnputStream.java:239) 
+at test.java.io.MaliciousStream.main(MaliciousStream.java:57) 
+
+The buffer array is filled twice, first with 2’s and then with l’s. The buffer’s client (the main 
+method) never sees the 2’s because they are immediately overridden with l’s. The exception is 
+thrown when all characters from the buffer array were read and the buffer attempts to read the first 
+
+
+22 
+
+
+
+cell behind the end of the array. The buffer attempts to read behind the end of the array because its 
+field count —which indicates how many characters are currently buffered—is larger than the length 
+of the buffer array, as explained above. We submitted this issue to Sun on 9 March 2007. 
+
+In our approach, this problem is avoided. Because fill operates on a share permission, our 
+verification approach forces taking into account possible field changes through reentrant calls with 
+other share permissions. (This is precisely what our malicious stream does.) We could avoid field 
+reassignments by having read require a full permission, thereby documenting that (modifying) 
+reentrant calls are not permitted for this method. 
+
+7 Soundness 
+
+This section proves soundness for a fragment of the system presented in the previous sections. To 
+this end, we define a simple core language with an instrumented dynamic semantics that tracks 
+fractions for references and states for objects. Since our approach guarantees protocol compliance 
+at compile time it is not actually necessary to track fractions or states during execution; we only 
+do this for the purpose of proving soundness. 
+
+The dynamic semantics is given as a small-step evaluation semantics that modifies a heap. 
+Heaps track fractions for references and states for objects. In order to properly manipulate heaps 
+we need to include fractions into our expressions, e.g., when passing an object as an argument to a 
+method. It is assumed that typechecking ensures that the used fraction is available according to the 
+current permission set. One could actually insert fractions into expressions based on typechecking. 
+
+Heaps track fractions both for stack and field references. Objects are represented as k ■ o i—► 
+C(f — k ■ o)@S, which is read as, “object o of class C with field values o for its fields /. / are the 
+fields defined in class C. The initial k indicates the fraction that is currently available on the stack 
+for accessing o. The fractions k are fractions of the referenced objects that are held by o’s fields. 
+
+Compared to the full system, the fragment proven sound has the following limitations. 
+
+• Inheritance and subtyping are not supported. 
+
+• Only permissions for objects as a whole are supported and expressed as k ■ r@s. The fraction 
+k distinguishes pure (k = 0), shared (0 < k < 1) and full (k = 1) access. Thus, permissions 
+for dimensions are not supported. Therefore, we do not include state dimensions into the 
+formal system as they can be easily encoded with separate states for each element of the 
+cross product of states from different dimensions. 
+
+• Specifications are deterministic. 
+
+• We assume that all expressions can have effects. This means that temporary state information 
+is almost immediately forgotten. 
+
+In future work we plan to extended this fragment to support structural subtyping, non-deterministic 
+specifications, and effect tracking for expressions similar to the formal system presented in pre¬ 
+ceding sections. We plan to encode inheritance, state dimensions, and permissions for subtrees of 
+the state space of an object in this extended fragment. 
+
+
+23 
+
+
+
+Despite the simplified syntax, typing rules of the core language are largely unchanged. The 
+inv c judgment discussed before is dramatically simplified in the absence of permissions for sub¬ 
+trees. To simplify the dynamic semantics we assume that inv^s, k) refers to fields / with this.f. 
+(As before, if k = 0 then the state invariant is purified, see figure 13.) We allow unpacking arbi¬ 
+trary objects, not just the receiver as in the system presented before. We keep insisting that only 
+one object is unpacked at a time and that objects be packed before any methods are called. This 
+ensures that effects are only collected for one object at a time (proven in a separate lemma). In 
+order to so, the typechecking judgment for our core system keeps track of what object is currently 
+unpacked in a separate context. 
+
+
+24 
+
+
+
+7.1 Core Language Syntax 
+
+
+terms 
+
+t 
+
+:= 
+
+X 
+
+variable 
+
+
+
+I 
+
+0 
+
+object 
+
+expressions 
+
+e 
+
+:= 
+
+k ■ t 
+
+term 
+
+
+
+1 
+
+new C(k ■ t) 
+
+object construction 
+
+
+
+I 
+
+k ■ t.mfk ■ t ) 
+
+method call 
+
+
+
+1 
+
+let x = e\ in e 2 
+
+binding 
+
+
+
+I 
+
+unpack k ■ t@s in e 
+
+unpack 
+
+
+
+I 
+
+pack t to s in e 
+
+pack 
+
+
+
+1 
+
+k ■ t.f 
+
+field read 
+
+
+
+1 
+
+ti-f ■■= k-t 2 
+
+assignment 
+
+expr. types 
+
+E : 
+
+:= 
+
+3x : C.P 
+
+
+class decls. 
+
+CL : 
+
+:= 
+
+class C { states s refine alive; C f I N M } 
+
+methods 
+
+M : 
+
+:= 
+
+C r m(C x) : P —o 3resu.lt : C r 
+
+P = e 
+
+initialization 
+
+I 
+
+:= 
+
+initially (3/ : C.P,s ) 
+
+
+invariants 
+
+N 
+
+:= 
+
+s = P 
+
+
+references 
+
+r 
+
+:= 
+
+t 
+
+terms 
+
+
+
+| 
+
+t-f 
+
+fields 
+
+predicates 
+
+P 
+
+:= 
+
+k ■ r@s 
+
+permission 
+
+
+
+| 
+
+Pl®P-2 
+
+conjunction 
+
+valid contexts 
+
+T : 
+
+:= 
+
+■ | r,x : C 
+
+
+stores 
+
+E : 
+
+:= 
+
+■ E ,o:C 
+
+
+linear contexts 
+
+A : 
+
+:= 
+
+• 1 A ,P 
+
+
+heaps 
+
+p 
+
+:= 
+
+p,k ■ O ea C(f = k ■ o)@S 
+
+
+object states 
+
+s 
+
+:= 
+
+s 
+
+packed in state 
+
+
+
+| 
+
+Unpacked (k) 
+
+unpacked modifying 
+
+
+
+
+Unpacked (s) unpacked read-only in state 
+
+packing flags 
+
+u 
+
+:= 
+
+— 
+
+no object unpacked 
+
+
+
+| 
+
+k ■ t@s 
+
+unpacked object 
+
+effects 
+
+£ : 
+
+:= 
+
+0 | {t.f} | £i u£ 2 
+
+
+fractions 
+
+k 
+
+G 
+
+[0,1] 
+
+
+class names 
+
+C 
+
+
+
+
+method names 
+
+m 
+
+
+
+
+variable names 
+
+X 
+
+
+
+
+field names 
+
+f 
+
+
+
+
+state names 
+
+s 
+
+
+
+
+object locations 
+
+0 
+
+
+
+
+
+25 
+
+
+
+
+
+
+
+
+7.2 Judgment Forms 
+
+
+Judgment 
+
+Judgment form 
+
+Explanation 
+
+Evaluation 
+
+e\p i—> e'\p' 
+
+In heap p, expression e evaluates to e', changing 
+the heap to p', in one step. 
+
+Expression typing 
+
+r|£|A|Mhe: E\£\u' 
+
+In variable context T, store £, linear context A, 
+and unpacking flag u, expression e has type E 
+and may assign to fields in E and and changes 
+unpacking to u'. 
+
+Store typing (defini¬ 
+tion 1) 
+
+£ A \u h p 
+
+With store £, linear context A, and packing flag 
+u, heap p is well-typed. 
+
+Linear logic entail- 
+ment (figure 14) 
+
+r|£|A h P 
+
+In variable context T and store £, linear context 
+A proves P. 
+
+Runtime property 
+check (definition 5) 
+
+p\k ■ oh P 
+
+Heap p restricted to stack permissions k ■ o sat¬ 
+isfies property P. 
+
+
+7.3 Preservation 
+
+Definition 1 (Store Typing) If 
+
+• dom(Yf) = dom(p) 
+
+• If a = — then all objects in fi are packed and no permissions in A refer to fields 
+
+• Ifu = k u ■ o unp @s u then k Q ■ o unp > C(.. ,)@S is the only object unpacked in p and all per¬ 
+missions to fields in A refer to fields ofo unp and either (a) k u — 0 and S = Unpacked(s'), 
+where s' < s u , or (b) k u > 0 and S = Unpacked(k u ). 
+
+• Vo G dom(Tf): Ifk ■ o i—>• C(f — k ■ o)@S G p then 
+
+- (o : C) G £ 
+
+- Either S = Unpacked(k) or S = Unpacked(s) and [o/this]inv c (s , 1) is satisfied by 
+o’s fields or S = s and \o/this\inv c (s. 1) is satisfied by o’s fields 
+
+- w(o, A) < k 
+
+- Tjf-|£|A h k' ■ o@s' (8) T then S < s' and k' < k. 
+
+- 7jf-|£|A h /c'-o./j@s®T then k'i < ki(ando = o unp ) and k o - 0 i ^ C' 0 (.. .)@s 0 G pand 
+s 0 < s and either S = Unpacked(s'), which implies k\ = 0 , or S = Unpacked(k') 
+
+then £|A|m h p 
+
+Definition 2 (Heap Manipulations) For a given heap p, 
+
+• p[k ■ o ^ C(f = k ■ o)@5] replaces the entry for o in p with the information given in [...} 
+
+• Ifk' ■ o i—* C{.. .)@S G p then 
+
+
+26 
+
+
+
+- Ifk' — k > 0 then // — k ■ o — p[(k' — k) ■ o i—> C(.. ,)@S 
+
+- Ifk J + k < 1 then fi + k ■ o = //[(&' + fc) • o C(.. 
+
+Definition 3 (Object Weight) For any o, //, and A: 
+
+• w(o,//) = Efc.oe^ 
+
+• w(o, A) = Efc.oe 
+
+, , f k if u = k ■ o@s 
+
+w (o, u ) | 0 otherwise 
+
+Definition 4 (State Ordering) The relation S < S' is defined with the following rules: 
+
+S < S S < alive Unpacked(s) < s s < Unpacked(s) 
+
+Note: These rules equate any state s with read-only unpacking in that state (Unpacked(s)). 
+Moreover, modifying unpacked (Unpacked (A)) is considered a substate of alive. This convention 
+simplifies store typing because it makes a state information alive about an object valid even if that 
+object is unpacked. 
+
+Definition 5 (Property Satisfied at Runtime) If 
+
+• k' ■ oh C(.. .)@s C /i 
+
+• -|o : C\k ■ o@s b P (an instance o/T|E|A b P) 
+
+• k < k' 
+then p\k ■ ob P 
+
+Lemma 1 (Inversion) //T|E| A| a b e : E \ £\u' then 
+
+• Ife is newCfk ■ t ) then £ = 0 and E — 3x : C. 1 • x@s and T|E|A b [o/ f]P and u = v!. 
+
+• Ife is k-t:m(k ■ t) then £ = 0 and E = E’ and T|E| A b [t/this] \t/x\P and T|E b t : C and 
+T|E b t : C and mtype(C, m) = \/x : C.P —° E andx : C, this : Cj • |P|— b e m : E \ 0|—, 
+where mbody(C, m) = x.e m , and u = u' = —. 
+
+
+Lemma 2 (Substitution) IfT, x : CjE| A, P\u b e : E \ £\ul, where variables x do not occur in 
+A and £, and these exists A' and objects o such that T|E| A' b [o/x}P then T|E| A, [o/x\P\u b e : 
+E\£\u'. 
+
+Lemma 3 IfT\T,\A\u b e : E \ £\u! then either (a) u = — and £ = 0 or (b) u = k ■ t@s and £ 
+contains only fields oft. 
+
+
+27 
+
+
+
+Proof: (a) u = — is not a valid precondition for producing effects (using assignment or packing), 
+(b) By induction on typing derivations, using (a). Only one object can be unpacked at a time, 
+permission for unpacked object is needed for assignments and packing, and effect of unpack 
+expression is 0. 
+
+Lemma 4 (Compositionality) IfZ\A\u b p and A = A 1; A 2 then 5H|A x |ti b p and E|A 2 |m b p. 
+
+Proof: Immediate from the definition of store typing. 
+
+Our preservation theorem is strengthened to preserve a “frame” of potential additional per¬ 
+missions around the expression being evaluated. This frame property is needed when appealing 
+to the induction hypothesis. Since expressions are in let-normal form, only one case, E-Let-C, 
+represents a congruence rule that appeals to the induction hypothesis. 
+
+The dynamic semantics relies on fractions being part of expressions in order to modify the 
+heap accordingly, e.g., when reading a field. In typechecking expressions, we tacitly assume that 
+permissions used for typechecking an expression have the fractions prescribed in the expression. 
+A surface syntax could omit fractions in expressions and instead insert them automatically based 
+on the permissions used in typechecking. 
+
+Theorem 1 (Preservation) If 
+
+• -|E|A|u b e : E \ £\u" and 
+
+• E | A, A *\u b p, where A* are extra permissions that contain no temporary state information 
+and no permissions for fields in £, and 
+
+• e\p i—> e!\p! 
+then there exists 
+
+• E'DS and 
+
+• u! and 
+
+• £', where either (a) e\p i—> e'\p' unpacks an object o, i.e., u = — and v! — k ■ o@s and 
+£' — £ only mentions fields ofo or (b) £' C £ and 
+
+• A', where A' contains no permissions for fields in £ — £' 
+such that 
+
+• •|E / |A / |'u / b e! : E \ £'\u" and 
+
+• S'| A', A* b p' and 
+
+• Vo G dom(p) : w(o, p) — w(o, A) — w(o, u ) < w(o, p') — w(o, A') — w(o, u'). 
+
+
+28 
+
+
+
+Proof: By structural induction on the derivation of e|/i i—> e '|//'. 
+
+Case E-New 
+
+p\k ■ o b [o/J}P p" = p - k ■ o init(C) = (3/ : C.P, s ) (o* ^ dom (p)) 
+
+new C(k ■ o)\p i—■> 1 • o*\p", 1 • o* t—■> C(f = k ■ o)@s 
+
+Thus, e is new C(k ■ o ), e' is 1 • o*, and p' = p ", 1 • o* i—»• C(f = k ■ o)@s. 
+
+
+*|£|A|w b e : E \ £\u" Assumption 
+
+£|A,A*|wb/x Assumption 
+
+u = u" and £ = 0 and E — 3x : C.l • x@s and -|£|A b [o/f]P Inversion 
+
+Define £' = (£, o* : C) and u' = u and £' = 0 = £ and A' = 1 • o*@S 
+
+£' D £ By definition 
+
+-j£'|A'|xt h 1 ■ o* : 3x : C.l ■ x@s \ 0 |u By rule T-Loc 
+
+
+Vo 6 dom(yu) : tc(o, n) — w(o, A) — w(o, u ) = w(o, /i') — w(o, A') — w(o, u ) 
+
+k ■ o move from stack to memory 
+
+E'l^A’Vb/z' 
+
+A' only holds permission to o*, existing objects do not change state, fractions in A* remain valid 
+
+
+Case E-Call 
+
+
+mbody(C, m) = x.e m mtype(C, m) = Vx : C.P —o E' 
+n\k ■ o, k ■ o b [o/this][o/x\P all objects packed in p 
+
+k ■ o:m[k ■ o)\p i—> [o/this][o/x\e m \p 
+
+
+Thus, e is k ■ o:m[k ■ o ), e' is [o/this][o/x]e m , and p' = p. 
+
+
+•|£|A|ub e : E\£\u" 
+
+Assumption 
+
+£ A, A*\u b p 
+
+Assumption 
+
+£ = 0 and u = u” = — and E = E' and • £ A b [o/this] [o/x\P 
+
+Inversion 
+
+x : C, this : Cj • \P — b e m : E \ 0 — 
+
+Define £' = £ and v! = — and £' = $ = £ and A' = A 
+
+Inversion (cont.) 
+
+• £ A — b [o/this][o/x]e m : E \ 0 — 
+
+Substitution 
+
+£ A, A* — b p 
+
+Given 
+
+Vo G dom(yu) : w(o, p) — w(o, A) — w(o, u ) = w(o, p) — tc(o, A) — w(o, u ) 
+
+No changes 
+
+Case E-Let-C 
+
+
+ei| P i —> ej|/i' 
+
+
+
+let x = e\ in e 2 |p i—> let x = e\ in e 2 | p' 
+
+
+Thus, e is let x = e\ in e 2 and e' is let x = e\ in e 2 . 
+
+
+29 
+
+
+
+Assumption 
+Assumption 
+Inversion 
+Inversion (cont.) 
+Compositionality 
+
+
+•|£|A|xxb e : E\£\u" 
+
+£| A, A*|xx b /i 
+
+A = (Ai, A 2 ) and £ = £\ U £ 2 and no temporary states or fields from £\ in A 2 
+•|£|Ai|u b e\ : 3a: : C.P \ £\\u 2 and x : C|£|A 2 , P|xx 2 b e 2 : E \ £ 2 ]u" 
+
+£|Ax|xx b /x and £|A 2 |xx b /x 
+Apply induction hypothesis, using (A 2 , A*) as additional linear context. 
+
+Ex. £' A £ and u! and £[ and A',, where fields £\ — £[ do not occur in A' From i.h. 
+
+Either (a) u = — and u' = k ■ o@s and £[ — £\ only contains fields of o or (b) £\ C £ x i.h. (cont.) 
+-1£'|A 1 1it 7 b e[ : 3x : C.P \ £[\u 2 and £'| A^, A 2 , A*|xx' b ji! i.h. (cont.) 
+
+Vo G dom(/i') : w(o, /i) — w(o, Ax) — w(o, u) < w(o, ji') — w(o, A)) — w(o, u') i.h. (cont.) 
+Define £' = £ and £' = £[ U £ 2 and A' = (A' 1; A 2 ) 
+
+Fields £ — £' do not occur in A' £ — £' C £ x and fields £\ do not occur in A 2 
+
+£'| A', A*\u' b fi' From i.h. 
+
+Vo G dom(/i) : tu(o, /i) — w(o, A) — w(o, u ) < w(o, fi r ) — w(o, A') — w(o, v!) 
+
+From i.h.: fractions in A 2 unchanged 
+Subcase: u = — and u' = k ■ o@s and £[ — £\ only contains fields of o 
+
+
+A 2 , A* do not contain permissions for fields of o 
+A 2 , A* do not contain permissions for fields in £[ 
+
+■|£|A> / be':£\£'|u // 
+
+
+Definition of £| A, A*\u b /i 
+£[ — £\ contains only fields of o 
+By rule T-Fet 
+
+
+Subcase: £[ c £ x 
+
+A 2 , A* do not contain permissions for fields in £\ 
+■\i\A'\u'^ e' -.E\£'\u" 
+
+
+S[Q£i 
+
+By rule T-Fet 
+
+
+Case E-Fet-V 
+
+Thus, e is let x 
+
+
+k! -o^C(.. .)@S G 11 k < k! 
+let x = k ■ o in e 2 | / u 1 — > [o/x]e 2 |/r 
+
+k ■ o in e 2 , e' is [o/x]e 2 , and ji' = ji. 
+
+
+•|£|A|«b e : E\£\u" 
+
+£|A, A*\u\~ /i 
+
+A = (Ai, A 2 ) and £ = £\ U £ 2 
+
+•|£|Ai|m h k ■ o : 3x : C.P \ £\\ u 2 and x : C|£|A 2 , P\u 2 b e 2 : E \ £ 2 \u" 
+•|£| A x b [o/x\P and u = U\ and £ x = 0 thus £ 2 = £ 
+
+Define £' = £ and u' = u and £' = £ and A! = A 
+•|£|A| u\-e' :E\£\u" 
+
+£|A, A*\u b /x 
+
+Vo G dom(/i) : w(o, /i) — w(o, A) — w(o, u ) = w(o, /1) — w(o, A) — w(o, u ) 
+
+
+Assumption 
+Assumption 
+Inversion on e 
+Inversion (cont.) 
+Inversion on k ■ o 
+
+Substitution 
+Given 
+No changes 
+
+
+Case E-Unpack-Modifying 
+
+k' ■ o 1 —>• C(.. .)@s' G/x 0 <k <k' s' < s 
+unpack k ■ o@s in e'|/x 1 — > e'\/i[(k' - k) ■ o i-> C(.. .)@Unpacked(A;)] 
+
+
+30 
+
+
+
+Thus, e is unpack k ■ o@s in e' and // = jx[{k' — k) ■ o i—>• C(.. .)@Unpacked(/c)]. 
+
+
+•|E|A|w h e : E\£\u" 
+
+E|A, A*\u h [i 
+
+A — (k ■ o@s, A") and u = u" = — and S = 0 
+•|E|A", [o/f/uTjinv^s, /c)|/c • o@s h e' \ E\£'\ — 
+
+Define S' = E and u' — k ■ o@s and A' = (A", [o/t/iA] inv c (s, &)) 
+o was unpacked 
+
+£' — £ = £' only contains fields of o 
+A' does not contain fields in £ — £' 
+
+
+Assumption 
+Assumption 
+Inversion 
+Inversion (cont.) 
+
+u = — and u' — k ■ o@s 
+
+Lemma 3 
+£ - £' = 0 
+
+
+• |E| A'h e' : E \ £'\— From above 
+
+E|A', A*|«' h ji' o was unpacked. A' differs from A in [o/th,is}\r\v c (s, k) 
+
+Vo 6 dom(/i) : w(o, n) — w(o, A )w(o, u) = w(o, //) — w(o, A') — w(o, u') 
+
+k ■ o moves from /i to u' 
+
+
+Case E-Unpack-Readonly 
+
+
+k! ■ o i-a C(.. .)@s' <G /i s' < s 
+
+unpack 0 • o@s in e'|/r i—> • o i-a C(. . .)@Unpacked(s / )] 
+
+Thus, e is unpack 0 • o@s in e' and fi' = n[k' ■ o i-a C{. . .)@Unpacked(s')]. 
+
+
+• | E| A |ix h e : E \ £\u" 
+
+E|A, A*|m h ii 
+
+A = (0 • o@s, A") and u = u" = — and £ = 0 
+
+• |E|A", [o/fWs]inv c (s,0)|0-o@s h e' : E\£' |- 
+
+Define S' = E and u' — 0 • o@s and A' = (A", [o/this]\n\/ c (s, 0)) 
+o was unpacked 
+
+£' — £ = £' only contains fields of o 
+A' does not contain fields in £ — £' 
+
+
+Assumption 
+Assumption 
+Inversion 
+Inversion (cont.) 
+
+u = — and u' — 0 • o@s 
+Lemma 3 
+£-£' = (/) 
+
+
+• |E | A' |xi 7 h e' : E \ £’\— From above 
+
+E|A', A*| u' h /i' o was unpacked, A' differs from A in [o/this]\nv c (s, 0) 
+
+Vo 6 dom(/i) : w(o, n) — w(o, A) — w(o, u ) = w(o, //) — w(o, A') — w(o, u') 
+
+No changes: 0 fraction unpacked 
+
+
+Case E-Read 
+
+
+k Q ■ o i-a c {..., / = k! ■ o'@s',.. .)@Unpacked(A; // ) e // k < k! 
+k ■ o.f\/i i—■> k ■ o'\(fi + k ■ o')[k 0 ■ o i-a C(. .., f = (k' — k) ■ o'@s', .. .)@Unpacked(A; // )] 
+
+Thus, e is k ■ o.f and e' is k ■ o' and // = (/r + k ■ o')[k 0 ■ o t —>• C(..., f = (k' — k) ■ 
+o',.. .)@Unpacked(/c // )]. 
+
+
+31 
+
+
+
+•|E|A|xx b e : E \ £\u" Assumption 
+
+E|A, A*|xx b n Assumption 
+
+u = u" = k ■ o@s, where k > 0, and £ = 0 and E — 3x : Cf.P and -|E|A b [ o.f/x\P Inversion 
+Define S' = E and u' — u and £' = $ = £ and A 7 = [o'/x]P 
+
+• |E| A'b k ■ o' : E \ 0 |u By rule T-Loc 
+
+E|A',A*|xx b/x' A' = [o'/o.f\A 
+
+Vo 6 dom(/i) : w(o, n) — w(o, A) — w(o, u ) = w(o, /i') — w(o, A') — w(o, u ) 
+
+k ■ o' moves from field to stack 
+
+
+Case E-Read-Pure 
+
+k Q - o i-> C(. . . ,f = k' ■ oW,.. .)@Unpacked(s") e ii 
+
+0 • o./l/x i—> 0 • o'\/i 
+
+Thus, e is 0 • o.f and e' is 0 • o'. 
+
+
+•|E|A|« b e : E\£\u" 
+
+E|A, A*\u b n 
+
+u — u" — k' ■ o@s and £ = 0 and E 
+k' = 0 
+
+Define S' = E and u' = u and £' = 
+•|E|A>bO-o' :E\Q\u 
+E|A', A*\u b /x 
+
+Vo 6 dom(yu) : w(o, /x) — w(o, A) - 
+
+
+= 3a: : C f .P and -|S|A b [o.f/x\P 
+= £ and A' = [o'/x]P 
+
+
+Assumption 
+Assumption 
+Inversion 
+Store typing 
+
+
+By rule T-Loc 
+A' = [o'/o./]A, ii is unchanged 
+w(o, u ) = w(o, fi) — w(o, A') — w(o, u ) No changes 
+
+
+Case E-Assign 
+
+
+k x ■ o! ^ c {..., / = k! ■ o',.. .)@Unpacked(A; // ) e /x k 2 ■ o 2 ^ C(.. .)@S 2 e /x k < k 2 k" > 0 
+n' = ((/x - k ■ o 2 ) + fc' • o')[/c 0 • o i-> C'(. .., / = k ■ o 2 ,.. .)@Unpacked(/c")] 
+
+Oi.f := k ■ o 2 \/i i—» k! ■ o'\n' 
+
+Thus, e is oi.f := k ■ o 2 and e' is k' ■ o'. 
+
+
+■|E|A|xx b e : E \ £\u" Assumption 
+
+E|A, A*|xx b /x and no permissions for fields in £ in A* Assumption 
+
+£ = {oi./} and u = u" = k u ■ ox@s u , where k u > 0, and A = (A 1? A 2 ) Inversion 
+
+E = 3 x'.P' ®[o\.f /x]P Inversion (cont.) 
+
+•|E|Ai b [o\.f/x']P' and -|E|A 2 |it \- k ■ o 2 : 3x : Cf.P\u Inversion (cont.) 
+
+Define S' = E and u' = u and £' = 0 C £ and A' = [o'jx')P' ® [o\.f /x\P 
+A' does not contain permissions for £ — £' = {o\.f} By definition of A' and assumption above 
+-1E| A'|tx b e' : E \ 0|xx By rule T-Loc 
+
+E|A', A*|xx b fi' A' = [oi.//o 2 ]([o / /oi./]A) and no permissions for oi.f in A* 
+
+Vo G dom(yu) : tu(o, n) — vj(o , A) — w(o, u ) = w(o, n') — tu(o, A') — w(o, u ) 
+
+k ■ o 2 and k' ■ o' move between field and stack 
+
+
+32 
+
+
+
+Case E-Pack-Modifying 
+
+
+k Q ■ o i—>• C(f = k ■ o)@Unpacked(A;) G /i invc(s) A satisfied by o’s fields 
+pack o to s in e'\ fj, i—> e'\n[{k 0 + k) ■ o i—>• C(f = k ■ o)@s] 
+
+Thus, e is pack o to s in e' and // = /i[(fc 0 + A:) • o i—^ C(f = k ■ o)@s]. 
+
+
+Assumption 
+Assumption 
+Inversion 
+Inversion (cont.) 
+Inversion (cont.) 
+
+
+•|£|A|wh e : E\E\u" 
+
+£| A, A*\u\~ fi and no temporary states or permissions for £ in A* 
+u = k ■ o@s' and u" = — and £ = {o.f} and A = (A", A'") 
+
+No temporary states or permissions for o.f in A'" 
+
+■|£|A" h [. o/this}\r\\/c(s , k) and -|5U|A //r , k ■ o@s| — h e' : E \ 0|— 
+
+Define £' = £ and v! — — and £' = 0 C S and A' = (A"', k ■ o@s) 
+
+No permissions for fields in S — £' = {o.f} in A' No permissions for {o.f} in A w from above 
+-1 £ | A' h e' : E \ 0 From above 
+
+£|A /// |m h /i Compositionality 
+
+£| A ,,, |— h //' A'" not affected by packing since no temporary states 
+
+£ | A', A* | — h // k ■ o@s comes from u, no temporary states or permissions for £ in A* 
+
+Vo G dom(/i) : w(o, n) — w(o, A) — w(o, u ) = w(o, n') — w(o } A') — w(o, v!) 
+
+k ■ o moves from u to // 
+
+
+Case E-Pack-Readonly 
+
+
+k Q ■ o i-a C(f = k ■ o)@Unpacked(s) e n invc(s) is satisfied by o’s fields 
+pack o to s in e'\n i—> e'\n[k 0 ■ o i—> C(f — k ■ o)@s 
+
+
+Assumption 
+
+Assumption 
+
+Inversion 
+Inversion (cont.) 
+Store typing, inversion 
+
+
+Thus, e is pack o to s in e' and // = n[k 0 ■ o i—>• C(f = k ■ o)@s]. 
+
+■|£|A|u h e : E\£\u" 
+
+£| A, A*\u\~ /i and no temporary states or permissions for £ in A* 
+u — k■ o@s r and u" = — and £ = {o.f} and A = (A", A'") 
+
+No temporary states or permissions for o.f in A'" 
+
+-1£| A" h [o/this]\n\/ c (s, 0) and -1£| A w , k ■ o@s|— h e! : E \ 0| — 
+k = 0 and s' = s 
+
+Define £' = £ and v! — — and £' = 0 C £ and A! = (A"', 0 • o@s) 
+
+No permissions for fields in £ — £' = {o.f} in A' No permissions for {o.f} in A w from above 
+-1£|A'| — h e' : E \ 0|— From above 
+
+£ | A'" | u h /i Compositionality 
+
+£|A /// |— h fi' Only packing changes 
+
+£| A', A*| — h n' 0 • o@s replaces u, no temporary states or permissions for £ in A* 
+
+Vo G dom(/i) : w(o, fi) — w(o, A) — w(o, u ) = w(o, /a') — w(o, A') — w(o, u') 
+
+No changes: 0 fraction packed 
+
+
+33 
+
+
+
+7.4 Progress 
+
+Lemma 5 (Canonical Form) Ife is a value then e has the form k ■ o. 
+
+Let-normal form for expressions simplifies proving progress: In closed terms, arguments to 
+atomic expressions (new, method call, field read, etc.) are automatically values. We reflect this 
+directly in the cases we prove. 
+
+Theorem 2 (Progress) Tjf-|E|A |m b e : E \ S\u' — i.e., e is closed and well-typed—then either e 
+is a value k ■ o or else, for any heap p st. E|A|w b p, there exists an expression e' and a heap //' 
+with e\p i—> e'\p!. 
+
+Proof: By structural induction on the derivation of -|E|A|w b e : E \ £\u'. 
+
+Case T- Var N/A: Variable is not a closed term. 
+
+Case T-Loc 
+
+(o : C) G E E|A b [ o/x\P 
+•|E|A|w b k ■ o : 3x : C.P \ 0 |u 
+
+k ■ o is a value. 
+
+Case T-New 
+
+o:CCE init(C) = (3/ : C.P, s) -|E|Ab [o/f]P 
+•|E|A|w b new C(k ■ o) : 3x : C. 1 • \ 0| u 
+
+E|A b p Assumption 
+
+k' ■ o i—> C(.. .)@s C p such that k <k' and p\k ■ o b [o/ f]P Heap well-typed 
+
+Define p' = (p — k ■ o), 1 • o* i—■> C(f = k ■ o@s)@s (where o* 6ovr\(p)) and e' — 1 • o* 
+
+e\p\ —> e'\p' ByruleE-NEW 
+
+Case T-Call 
+
+(o : C) e E o : C C E • |T|A b [o/this] [o/f]P 
+mtype(C, m) = \/x : C.P —o E 
+
+-1E|A| — bbo.m(Fo) :E\Hi | — 
+
+E|A b p 
+
+k' ■ o i—>• C(.. .)@s G p and k! ■ o i—»• C(.. .)@s C p 
+k <k' and k <k' and p\k ■ o,k • o b [o/this][o/f]P 
+Define p' — p and e' as [o/this][o/x\e m where mbody(C, m) = x.e m 
+e\p i—> e'\p' 
+
+Case T-Let 
+
+•|E|Aim b e\ : 3a; : C.P \ S\\u 2 x : C|E|A 2 , P\u 2 b e 2 : E \ 
+
+No temporary states or permissions for £\ in A 2 
+
+• | E | Ai, A 2 |m b let x — ei in e 2 : E \ £\ U Efv! 
+
+
+Assumption 
+Heap well-typed 
+Heap well-typed (cont.) 
+
+By rule E-Call 
+
+
+34 
+
+
+
+£|A h n 
+£|Ai h/i 
+
+Subcase: e x is a value 
+e\ = k ■ o 
+e\n i—> [o/x\e 2 |/i 
+
+
+Assumption 
+
+Compositionality 
+
+Canonical form 
+By rule E-Let-V 
+
+
+Subcase: e x makes a step 
+Ex // st. e x \n i—> e[\n' 
+e\n i—> let x = e x in ea|/^ / 
+
+
+From i.h. 
+By rule E-Let-C 
+
+
+Case T-Unpack 
+
+
+(o:C)GS • £ A h /c • 
+
+o@s • 
+
+£ \D', [o/this]\n\f c (s, k)\k ■ o@s h e' : E \ £\ 
+
+— 
+
+
+£ A, A' 
+
+— h unpack k ■ o@s in e' : E \ 0 — 
+
+
+£|A h p Assumption 
+
+k! ■ o i—> C{.. .)@s' G n st. k < k! and s' < s Heap well-typed 
+
+Subcase k > 0 
+
+Define // = / \i[(k' - k) ■ o ^ C(.. .)@Unpacked(A;)] 
+e\n i—> e'l/i' 
+
+Subcase k = 0 
+
+Define fi' = / x[{k' - k) ■ oi-> C{.. .)@Unpacked(s / )] 
+e\n i—> e'l/i' 
+
+Case T-Read 
+
+•|£| A h [o.fi/x\P localFields(C) — f :T k u = 0 implies k = 0 
+•|£|A|/c u • o@s u h k ■ o.fi : 3x : Ti.P \ 0| k u ■ o@s u 
+
+
+By rule E-Unpack-Modifying 
+
+
+By rule E-Unpack-Readonly 
+
+
+£|Ah/i 
+
+k Q ■ o f—> C(... , fi = • Oj,.. e /i st . k < ki 
+
+Define p' = (p + k ■ o.i)[k 0 ■ o ^ C(..., fi = (Ay — 
+
+Subcase k u > 0 
+
+S = Unpacked(/c u ) 
+
+e|/i i—> e'|/i' 
+
+
+Assumption 
+Heap well-typed 
+
+k) ■ Oi,.. .)@S] and e' as k ■ o.i 
+
+Heap well-typed 
+By rule E-Read 
+
+
+Subcase k u = 0 
+k = 0 
+
+S = Unpacked (s) 
+
+/i' = /x 
+e|/x i—> e'|/i 
+
+
+Implied by typing rule 
+Heap well-typed 
+Moved fraction is 0 
+By rule E-Read-Pure 
+
+
+35 
+
+
+
+Case T-Assign 
+
+
+•j£|A F k ■ o : 3x : Q.P • |£|A' F [o'.fi/x'}P' 
+local Fields(C") = JTC (o': C') e £ k' > 0 
+■|£|A, A'|fc' • oW F o'.fi := k ■ o : 3x' : C^P' ® [o'.fi/x\P \ {o x • oW 
+
+£|A F p Assumption 
+
+k' Q ■ o' i—► C (..., fi = ki ■ Oi,.. .)@Unpacked(A; / ) e yU Heap well-typed 
+
+k Q ■ Oi i—>• Ci(.. st. k <k Q Heap well-typed 
+
+Define fi' = ((/i — k ■ o) + ki ■ Oi)[k' 0 ■ o' > C(. ..,/* = k ■ o,.. .)@Unpacked(/c / )] and e' as ki ■ Oi 
+e\n i—> e'l/x' By rule E-ASSIGN 
+
+Cast T-Pack 
+
+•|£|A h [i o/this}'\r\\/c(s , fc) • |E|A', k ■ o@s|— h e' : E \ 0| — k — 0 implies s' = s 
+lOCalFields(C) — f : C (o : C) £ E No temporary states or permissions for o.f in A' 
+
+-1 E | A, A'| A: • o@s' F pack o to s in e' : E \ {o.f} | — 
+
+
+E|A F p 
+Subcase k > 0 
+
+fe 0 ■ o C(. . .)@Unpacked(/c) e p 
+o’s fields satisfy [o/t/iA]invc(s, /c) 
+
+Define p! = /x[fc • o i—>• C(.. .)@s] 
+e|yU i—> e'l/r' 
+
+Subcase k = 0 
+
+k Q ■ o c(. . .)@Unpacked(s") e p 
+s" < s and o’s fields satisfy [o / this}'\r\\/ c{s ", 1) 
+Define p' = yu[/c • o C(.. .)@s // ] 
+e\p i—> e'\p! 
+
+
+Assumption 
+
+Heap well-typed 
+-|E| A F [o/this]\r\Vc(s, k) and heap well-typed 
+
+By rule E-Pack-Modifying 
+
+Heap well-typed 
+Heap well-typed 
+
+By rule E-Pack-Readonly 
+
+
+8 Related Work 
+
+In previous work we proposed more expressive typestate specifications [4] that can be verified 
+with the approach presented in this paper. We also recently proposed full and pure permissions 
+and applied our approach to specifying full Java iterators [3]. Verification of protocol compli¬ 
+ance has been studied from many different angles including type systems, abstract interpretation, 
+model checking, and verification of general program behavior. Aliasing is a challenge for all these 
+approaches. 
+
+The system that is closest to our work is Fugue [11], the first modular typestate verification 
+system for object-oriented software. Methods are specified with a deterministic state transition of 
+
+
+36 
+
+
+
+the receiver and pre-conditions on arguments. Fugue’s type system tracks objects as “not aliased” 
+or “maybe aliased”. Leveraging research on “alias types” [29] (see below), objects typically remain 
+“not aliased” as long as they are only referenced on the stack. Only “not aliased” objects can 
+change state; once an object becomes “maybe aliased” its state is permanently fixed although 
+fields can be assigned to if the object’s abstract typestate is preserved. There exists no soundness 
+proof for Fugue. 
+
+Our work is greatly inspired by Fugue’s abilities. Our approach supports more expressive 
+method specifications based on linear logic [17]. Our verification approach is based on “access per¬ 
+missions” that permit state changes even in the presence of aliases. We extend several ideas from 
+Fugue to work with access permissions including state invariants, packing, and frames. Fugue’s 
+specifications are expressible with our system [4]. Fugue’s “not aliased” objects can be simulated 
+with unique permissions for alive and “maybe aliased” objects correspond to shared permissions 
+with state guarantees. There is no equivalent for state dimensions, temporary state assumptions, 
+full, immutable, and pure permissions, or permissions for object parts in Fugue. We prove a core 
+fragment of our system sound. 
+
+Verification of protocol compliance has also been described as “resource usage analysis” [21]. 
+Protocol specifications are based on very different concepts including typestates [30, 10, 23], type 
+qualifiers [15], size properties [8], direct constraints on ordering [21, 31], and effective refinements 
+[27]. None of the above systems can verify implementations of object-oriented protocols like our 
+approach and only one [31] targets an object-oriented language. Temporary state information, full, 
+and pure permissions are not supported. Effective type refinements [27] employ linear logic rea¬ 
+soning but cannot reason about protocol implementations and do not support aliasing abstractions. 
+Hob [23] verifies data structure implementations for a procedural language with static module in¬ 
+stantiation based on typestate-like constraints using shape analyses. In Hob, data can have states, 
+but modules themselves cannot. In contrast, we can verify the implementation of stateful objects 
+that are dynamically allocated and support aliasing with permissions instead of shape analysis. 
+
+Because programming with linear types [32] is very inconvenient, a variety of relaxing mech¬ 
+anisms were proposed. Uniqueness, sharing, and immutability (sometimes called read-only) [6] 
+have recently been put to use in resource usage analysis [21, 8]. Alias types [29] allow multi¬ 
+ple variables to refer to the same object but require a linear token for object accesses that can be 
+borrowed [6] during function calls. Focusing can be used for temporary state changes of shared ob¬ 
+jects [12, 15, 2]. Adoption prevents sharing from leaking through entire object graphs (as in Fugue 
+[11]) and allows temporary sharing until a linear adopter is deallocated [12]. All these techniques 
+need to be aware of all references to an object in order to change its state. 
+
+Access permissions allow state changes even if objects are aliased from unknown places. More¬ 
+over, access permissions give fine-grained access to individual data groups [24]. States and frac¬ 
+tions [5] let us capture alias types, borrowing, adoption, and focus with a single mechanism. Shar¬ 
+ing of individual data groups has been proposed before [6], but it has not been exploited for rea¬ 
+soning about object behavior. In Boyland’s work [5], a fractional permission means immutability 
+(instead of sharing) in order to ensure non-interference of permissions. We use permissions to keep 
+state assumptions consistent but track, split, and join permissions in the same way as Boyland. 
+
+Global approaches are very flexible in handling aliasing. Approaches based on abstract inter- 
+
+
+37 
+
+
+
+pretation (e.g. [1, 18, 13]) typically verify client conformance while the protocol implementation 
+is assumed correct. Sound approaches rely on a global aliasing analysis [1, 13]. Likewise, most 
+model checkers operate globally (e.g. [20]) or use assume-guarantee reasoning between coarse¬ 
+grained static components [16]. The Magic tool checks individual C functions but has to inline 
+user-provided state machine abstractions for library code in order to accommodate aliasing [7]. 
+The above analyses typically run on the complete code base once a system is fully implemented 
+and are very expensive. Our approach supports developers by checking the code at hand like a 
+typechecker. Thus the benefits of our approach differ significantly from global analyses. It is inter¬ 
+esting to note that protocols found by typestate inference in the presence of aliasing [28] are very 
+similar to what we can enforce. These research directions could be fruitfully combined. 
+
+Finally, general approaches to program verification such as ESC/Java [14] and Boogie [2] can 
+be used to specify and verify protocols. Our approach is strictly less expressive but supports pro¬ 
+tocols more directly, includes special-purpose aliasing abstractions, and therefore promises better 
+automation. 
+
+
+9 Conclusions 
+
+This paper proposes a modular type system for verifying usage and implementation of typestate 
+protocols that supports several forms of aliasing. It allows different references to control separate 
+parts of an object’s state, leveraging hierarchical state spaces based on state refinement. Multiple 
+references can have access to the same part of the state either by uniformly sharing access or by 
+giving one reference full access while the other references can only read but not change the state. 
+We support expressive typestate protocols as previously proposed [4] and specify protocols from 
+the Java standard library that were previously hard to capture [3]. 
+
+We develop these ideas in a type system that tracks “access permissions” to objects with linear 
+logic [17]. Permissions can be flexibly split and joined using fractions [5]. We extend ideas from 
+Fugue [11] to connect protocol specifications to implementations. Other novel features include 
+a principled approach to callbacks and dynamic tests and the interpretation of typestates as data 
+groups. 
+
+In future work we hope to develop a practical system that avoids user annotations in method 
+bodies. A challenge in this effort will be efficient reasoning about linear logic propositions. Like 
+any sound static reasoning system, our approach will reject protocol-compliant programs due to 
+reasoning imprecisions. Sharing and dynamic tests can be used to recover from imprecisions, 
+but an interesting empirical question will be how often programmers will have to resort to these 
+mechanisms. 
+
+
+Acknowledgments 
+
+We thank John Boyland, Frank Pfenning, Nels Beckman, Sebastian Bossung, and Jason Reed for 
+fruitful discussions on this topic. The presentation of linear logic follows lecture notes by Frank 
+Pfenning. 
+
+
+38 
+
+
+
+References 
+
+
+[1] T. Ball and S. K. Rajamani. Automatically validating temporal safety properties of interfaces. 
+In Proc. of the Eighth SPIN Workshop, pages 101-122, May 2001. 
+
+[2] M. Barnett, R. DeLine, M. Fahndrich, K. R. M. Leino, and W. Schulte. Verification of object- 
+oriented programs with invariants. Journal of Object Technology, 3(6):27—56, June 2004. 
+
+[3] K. Bierhoff. Iterator specification with typestates. In 5th Int. Workshop on Specification and 
+Verification of Component-Based Systems, pages 79-82. ACM Press, Nov. 2006. 
+
+[4] K. Bierhoff and J. Aldrich. Lightweight object specification with typestates. In Joint Euro¬ 
+pean Software Engineering Conf and ACM Symp. on the Foundations of Software Engineer¬ 
+ing, pages 217-226, Sept. 2005. 
+
+[5] J. Boyland. Checking interference with fractional permissions. In International Symp. on 
+Static Analysis, pages 55-72. Springer, 2003. 
+
+[6] J. T. Boyland and W. Retert. Connecting effects and uniqueness with adoption. In ACM 
+Symp. on Principles of Programming Languages, pages 283-295, Jan. 2005. 
+
+[7] S. Chaki, E. Clarke, A. Groce, S. Jha, and H. Veith. Modular verification of software compo¬ 
+nents in C. In Int. Conference on Software Engineering, pages 385-395, May 2003. 
+
+[8] W.-N. Chin, S.-C. Khoo, S. Qin, C. Popeea, and H. H. Nguyen. Verifying safety policies 
+with size properties and alias controls. In Int. Conference on Software Engineering, pages 
+186-195, May 2005. 
+
+[9] P. Cousot and R. Cousot. Abstract interpretation: A unified lattice model for static analysis 
+of programs by construction or approximation of fixpoints. In ACM Symp. on Principles of 
+Programming Languages, pages 238-252, 1977. 
+
+[10] R. DeLine and M. Fahndrich. Enforcing high-level protocols in low-level software. In ACM 
+Conf. on Programming Language Design and Implementation, pages 59-69, 2001. 
+
+[11] R. DeLine and M. Fahndrich. Typestates for objects. In European Conference on Object- 
+Oriented Programming, pages 465-490. Springer, 2004. 
+
+[12] M. Fahndrich and R. DeLine. Adoption and focus: Practical linear types for imperative 
+programming. In ACM Conf. on Programming Language Design and Implementation, pages 
+13-24, June 2002. 
+
+[13] S. Fink, E. Yahav, N. Dor, G. Ramalingam, and E. Geay. Effective typestate verification in the 
+presence of aliasing. In ACM Int. Symp. on Software Testing and Analysis, pages 133-144, 
+July 2006. 
+
+
+39 
+
+
+
+[14] C. Flanagan, K. R. M. Leino, M. Lillibridge, G. Nelson, J. Saxe, and R. Stata. Extended static 
+checking for Java. In ACM Conf on Programming Language Design and Implementation, 
+pages 234-245, May 2002. 
+
+[15] J. Foster, T. Terauchi, and A. Aiken. Flow-sensitive type qualifiers. In ACM Conf. on Pro¬ 
+gramming Language Design and Implementation , pages 1-12, 2002. 
+
+[16] D. Giannakopoulou, C. S. Pasareanu, and J. M. Cobleigh. Assume-guarantee verification 
+of source code with design-level assumptions. In Int. Conference on Software Engineering, 
+pages 211-220, May 2004. 
+
+[17] J.-Y. Girard. Finear logic. Theoretical Computer Science, 50:1-102, 1987. 
+
+[18] S. Hallem, B. Chelf, Y. Xie, and D. Engler. A system and language for building system- 
+specific, static analyses. In ACM Conf on Programming Language Design and Implementa¬ 
+tion, pages 69-82, 2002. 
+
+[19] D. Harel. Statecharts: A visual formalism for complex systems. Sci. Comput. Programming, 
+8:231-274, 1987. 
+
+[20] T. A. Henzinger, R. Jhala, R. Majumdar, and G. Sutre. Fazy abstraction. In ACM Symp. on 
+Principles of Programming Languages, pages 58-70, 2002. 
+
+[21] A. Igarashi and N. Kobayashi. Resource usage analysis. In ACM Symp. on Principles of 
+Programming Languages, pages 331-342, Jan. 2002. 
+
+[22] A. Igarashi, B. Pierce, and P. Wadler. Featherweight Java: A minimal core calculus for Java 
+and GJ. In ACM Conf. on Object-Oriented Programming, Systems, Languages & Applica¬ 
+tions, pages 132-146, 1999. 
+
+[23] V. Kuncak, P. Earn, K. Zee, and M. Rinard. Modular pluggable analyses for data structure 
+consistency. IEEE Transactions on Software Engineering, 32(12), Dec. 2006. 
+
+[24] K. R. M. Feino. Data groups: Specifying the modification of extended state. In ACM Conf. 
+on Object-Oriented Programming, Systems, Languages & Applications, pages 144—153, Oct. 
+1998. 
+
+[25] P. Fincoln and A. Scedrov. First-order linear logic without modalities is NEXPTIME-hard. 
+Theoretical Computer Science, 135:139-154, 1994. 
+
+[26] B. H. Fiskov and J. M. Wing. A behavioral notion of subtyping. ACM Transactions on 
+Programming Languages and Systems, 16(6): 1811—1841, Nov. 1994. 
+
+[27] Y. Mandelbaum, D. Walker, and R. Harper. An effective theory of type refinements. In ACM 
+Int. Conf. on Functional Programming, pages 213-225, 2003. 
+
+
+40 
+
+
+
+[28] M. G. Nanda, C. Grothoff, and S. Chandra. Deriving object typestates in the presence of inter¬ 
+object references. In ACM Conf on Object-Oriented Programming, Systems, Languages & 
+Applications, pages 77-96, New York, NY, USA, 2005. ACM Press. 
+
+[29] F. Smith, D. Walker, and G. Morrisett. Alias types. In European Symposium on Programming, 
+pages 366-381. Springer, 2000. 
+
+[30] R. E. Strom and S. Yemini. Typestate: A programming language concept for enhancing 
+software reliability. IEEE Transactions on Software Engineering, 12:157-171, 1986. 
+
+[31] G. Tan, X. Ou, and D. Walker. Enforcing resource usage protocols via scoped methods. In 
+Int. Workshop on Foundations of Object-Oriented Languages, 2003. 
+
+[32] P. Wadler. Linear types can change the world! In Working Conf on Programming Concepts 
+and Methods, pages 347-359. North Holland, 1990. 
+
+
+41 
+
+
+
+class C {... M ...} G CL T r m(T x) : P —° 3 result : P r .P' = e G M 
+m type (m,C) = Vx : T.P —o 3 result: T r .P' 
+
+C extends C" mtype(m, C') = VxTT.MS' implies (xTT, this : C); ■ h MS -o MS" 
+
+override(m, C, Vx : T.MS) 
+
+class C{... n = P . ..} G CL P = ®n'<n"<n pred G (n") class C... {P ...} G CL 
+pred c (n) = P pred c (n',n) = P localFields(C) = P 
+
+class C extends C' G CL 
+
+C extends C’ init(Ob ject) = (1, alive) 
+
+class C extends C {/ : T in n S initially (3/' : T 1 , f : T.P’ ® P, A) ... } 
+init(C') = (3 f : T'.P’, A’) •; (P,full(super,alive, [alive i-> 1],A')) h inv c (A) ® T 
+
+init(C) = (3f r 7T J , JTr.P' ® P, A) 
+inv G (A) = P => n' 
+
+in v c (n, A) = P <® pred c (n', n) <® pred c (n) inv c (n) = 1 => n 
+
+in v c (Ai) = Pi => rii pred c (ni, n) = P/ n, ® n 2 -C n (i G 1,2) 
+inv c (Ai ® A 2 ) = Pi ® P[® P 2 ® P 2 => n 
+
+invc(A) = Pi => n i pred c (n h n) = P[ n, © n 2 < n (i G 1,2) 
+inv c -(Ai © xl 2 ) = (Pi <g> Pj) © (P 2 ® pred c (n 2 , n)) => n 
+
+only pure permissions in P exists Share or full permission in P 
+
+effectsAllowed(P) = 0 effectsAllowed(P) = 1 
+
+Figure 10: Protocol verification helper judgments 
+
+
+42 
+
+
+
+P-Unpack 
+
+
+T; A he access (f/iWfr, n, g, k, A) receiver packed 
+k = 0 implies i — 0 T; (A', inve(n, g, k, A), unpacked(n, g, k, A)) h l c e : E\S 
+
+T; (A, A') \- l c unpack(n, k, A) in e : E \S 
+
+
+T; A he inve(n, g , k, A) ® unpacked (n, g, k, A 1 ) k = 0 implies A = A' 
+r; (A', access(r/iA fr , n, g, k, A)) h^ e : E \ £ localFields(C) = / : T in n J dom(A') 
+
+T; (A, A') \- l c pack n to A in e : E \ f 
+
+
+P-Pack 
+
+
+r h to : C 0 r h t:T T; A h [t 0 /this][t 0 /thiSf r ][t/x]P 
+mtype(m, C Q ) = Wx : T.P —o E i = effectsAllowed(P) receiver packed 
+
+
+T; A h* t 0 .m(t) : [t 0 /this][t 0 /thiSf r ][t/a:]P 
+
+
+P-Call 
+
+
+r h t : T T; A h [super/thisf r ] [t/x]P C extends C" 
+mtype(m, C) = Wx : T.P —o E i = effectsAllowed(P) receiver packed 
+T; A \~ l c super. m(t) : [super/thiSf r ][i/a;]P 
+
+
+P-SUPER 
+
+
+r ; A ht : : Ti.P ® p T; A' h c [fi/x']P' lOCalFields(C) = / : T in n 
+
+n l < n p = unpacked (n, g, k, A), k ^ 0 
+
+T ; (A, A') \~ l c assign f t := t : Ax' : T;.P' ® \fi/x]P ®p\fi 
+
+
+P-Assign 
+
+
+Figure 11: Permission checking for expressions (part 2) 
+
+
+in v c (n,g,k,A) 
+inve(n, g, 0, A) 
+where abovee(n) 
+
+
+inve(n, A) ® purify(abovee(n)) 
+purify (inv c (n, A) <g> abo ve c (n)) 
+
+0n':n<n'<alive P re< ^c( n ') 
+
+
+Figure 12: Invariant construction 
+
+
+p = access (r, n, g, k, A) purify(Pi) = P[ purify(P 2 ) = P 2 ope {®, &, ©} 
+purify(p) = pure(r, n, g, A) purify(Pi op P 2 ) = P[ op P' 2 
+
+unit e (1, T. 0} purify(P) = P' purify(P) = P' 
+
+purify(unit) = unit purify(3^ : H.P) = 3z : H.P' purify(Vt : H.P) = \/z : H.P' 
+
+
+Figure 13: Permission purification 
+
+
+43 
+
+
+
+r; A b P' P' => P 
+
+r .p h p LlNHYP -- r . A h p - SUBST 
+
+
+r ; AihPi r; a 2 h p 2 
+
+T; (Ai, A2) I - P\® P2 
+
+
+r ; -hi 
+
+
+11 
+
+
+r ; AbPi®p 2 r ; (A',p 1 ,p 2 )hP 
+r ; (A, A') h p 
+
+
+®E 
+
+
+r ; Ahi r ; APP 
+r; (A, A') b P 1E 
+
+
+r ; Ah p 1 r ; Ah p 2 
+r ; a b p 1 & p 2 
+
+
+&/ 
+
+
+r ; a h Pi & p 2 
+r ; a h Pi 
+
+
+
+
+r ; a h Pi & p 2 
+r; A h P 2 
+
+
+&e r 
+
+
+T; A b T 
+
+
+TJ 
+
+
+r ; a h Pi 
+
+r ; a h Pi ® p 2 ® 1l 
+
+
+r; A h P 2 
+
+r ; a b Pi ® p 2 
+
+
+®Ir 
+
+
+no 0 introduction 
+
+(r, z : H); A b P 
+T; A b : P.P W 
+
+rb/i:P r ; Ah[A/z]p 
+r ; A b 3z : H.P 31 
+
+
+no T elimination 
+
+r; (A',Pi)hP 
+r ; a h Pi ® p 2 r ; (A',p 2 )hP 
+r ; (A, A') i- p 
+
+
+r ; Ah-o 
+
+r ; (A, A') b p 0E 
+
+Thh:H r ; AhVz: H.P 
+
+r ; Ab [h/z\p yE 
+
+T;A\~3z:H.P (r, z : H), (A', P) b P' 
+rj (A, A') b p' 
+
+
+Figure 14: Linear logic for permission reasoning 
+
+
+3 E 
+
+
+44 
+
+
+
+A = A! = A" or {A = A' and A" = n) or (A = A" and A' = n) 
+access(r, n, g, k, A) access(r, n, g/2, k/ 2, A') <g> access(r, n, g/2, /c/2, A 
+
+A = A' = A" or (A = A 1 and A" = n) or (A = A" and A 1 = n) 
+
+
+access (r, n, g, k, A) access(r, n, g/2 , k, A') © pure(r, n, g/2 , A" 
+
+
+,a Sym 
+Asym 
+
+
+n i # n 2 A x -< nj < n A 2 -< n 2 < n 
+Pi = full (r , n t , {g, nodes/©, n) i-> l}/2, A* 
+
+full(r, n, g, A x (8) A 2 ) ^ pi ®p 2 
+
+
+F-Split-C 
+
+
+ri\ // n 2 Ai -< ri\ < n A 2 -< n 2 < n 
+Pi = full (r, rii, {g, n i—> 1 , nodes/©, n) i—>• l}/2, A/) 
+p 1 ®p 2 ^ full (ry© {g, n i-> 1},A 1 © A 2 ) 
+
+// A 2 
+
+
+F-Join-c 
+
+
+full/r, n, g , Ai © A 2 ) full(r, © g, Ai) © full/r, n, g , A 2 ) 
+
+A -< n' < n 
+
+full(r, © g, A) ©> full(r, n', (g, nodes(n', n) i—■> 1}, A) ° WN 
+
+A © n’ < n 
+
+full(r, n', {g, n t—> 1, nodes(n', n) i—>• 1}, A) ©► full/r, © (g, n > 1}, A) 
+
+n' < n 
+
+
+F-Up 
+
+
+pure/r, © (g, nodes(n', n) ^ k},A ) ©► pure/r, n',g, A) 
+
+
+P-Up 
+
+
+access (r, © g, /c, A) ©- access/r, © g, k, n) 
+
+
+Forget 
+
+
+Figure 15: Splitting and joining of access permissions 
+
+
+45 
+
+
+
+class BufferedlnputStream extends FilterInputStream { 
+
+states ready, reads refine open; 
+
+states within, eof refine ready; 
+
+states depleted, filled refine within; 
+
+states partial, complete refine filled; 
+
+reads := reading = true 
+ready := reading = false 
+
+depleted := pos > count® unique(sM/?er,alive,within) 
+
+partial := pos < count 0 count < buf length 0 unique(sM/?er, alive, open) 
+
+complete := pos < count 0 count = buf length 0 unique(,?M/?er, alive, open) 
+
+private boolean reading = false; 
+private int[] buf = new byte[8192]; 
+private int pos = -1, count = 0; 
+
+public int read () : Vg : {alive, open} i-> Fract.Vfc : Fract_= 
+
+unpack(open, k, open) in 
+
+let r = reading in if(r == false, . . . fill () ... ) 
+
+private bool fill() : Mg : {alive, open} i-> Fract.Vfc : Fract. 
+shar e(thisi r , open, g, k, depleted 0 eof) —o 
+shar e(thisf r , open, g, k, available 0 eof) = 
+unpack(open, k, depleted © eof) in 
+
+assign count = 0 in assign pos = 0 in 
+assign reading = true in 
+pack to reads in 
+
+let b = super.read() in 
+unpack(open,/c,open) in 
+
+let r = reading in assign reading = false in 
+assign count = 0 in assign pos = 0 in 
+if(r, if(b = -1, pack to eof in false, 
+pack to depleted in doFill (b) ) , 
+pack to eof in false) 
+
+private bool doFill(int b) : Vg : {alive, open} i—> Fract.Vfc : Fract. 
+shar e(thisu, open, g, k. depleted 0 partial) —° 
+share(//!hf r , open, g, k. partial 0 complete) = 
+unpack(open, k. depleted 0 partial) in 
+
+let c = count in let buffer = buf in 
+assign buffer[c] = b in assign count = c + 1 in 
+let 1 = buffer.length in 
+if (c + 1 >= 1, pack to complete in true, 
+assign reading = true in pack to reads in 
+
+let b = super, read () in unpack(open, k, open) in 
+let r = reading in assign reading = false in 
+assign count = c + 1 in assign pos = 0 in 
+pack to partial in 
+
+if(r == false | b == -1, true, doFill(b)) 
+
+Figure 16: Fragment of java . io . Buf feredlnputStream in core language 
+
+
+46 
+
+
+

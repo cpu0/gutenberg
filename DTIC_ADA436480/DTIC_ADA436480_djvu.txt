@@ -1,0 +1,3249 @@
+Type-Preserving Compilation of Featherweight Java 
+
+CHRISTOPHER LEAGUE, ZHONG SHAO, and VALERY TRIFONOV 
+Yale University 
+
+
+We present an efficient encoding of core Java constructs in a simple, implement able typed in¬ 
+termediate language. The encoding, after type erasure, has the same operational behavior as a 
+standard implementation using vtables and self-application for method invocation. Classes inherit 
+super-class methods with no overhead. We support mutually recursive classes while preserving 
+separate compilation. Our strategy extends naturally to a significant subset of Java, including 
+interfaces and privacy. The formal translation using Featherweight Java allows comprehensi¬ 
+ble type-preservation proofs and serves as a starting point for extending the translation to new 
+features. Our work provides a foundation for supporting certifying compilation of Java-like class- 
+based languages in a type-theoretic framework. 
+
+Categories and Subject Descriptors: D.3.4 [Programming Languages]: Processors— Compilers ; 
+F.3.3 [Logic and Meanings of Programs]: Studies of Program Constructs— Object-Oriented 
+Constructs 
+
+General Terms: Languages, Verification 
+
+Additional Key Words and Phrases: Java, object encodings, type systems, typed intermediate 
+languages 
+
+
+1. INTRODUCTION 
+
+Many compilation techniques for functional languages focus on type-directed com¬ 
+pilation [Peyton Jones et al. 1992; Shao and Appel 1995; Morrisett et al. 1996]. 
+Source-level types are transformed along with the program and then used to guide 
+and justify advanced optimizations. More generally, types preserved throughout 
+compilation can be used to reason about the safety and security of object code [Nec- 
+ula and Lee 1996; Necula 1997; Morrisett et al. 1999]. 
+
+Type-preserving compilers typically use variants of the polymorphic typed A- 
+calculus F u [Girard 1972; Reynolds 1974] as their intermediate representations. 
+Much is known about optimizing F u programs [Tarditi et al. 1996], about compiling 
+them to machine code [Morrisett et al. 1999], and about implementing the Tj^type 
+system efficiently in a production compiler [Shao et al. 1998]. 
+
+Recently, several researchers have attempted to apply these techniques to object- 
+oriented languages [Wright et al. 1998; Crary 1999; League et al. 1999; Vanderwaart 
+1999; Glew 2000a; League et al. 2001b]. While there is significant precedent for 
+
+
+This work was sponsored in part by DARPA OASIS grant F30602-99-1-0519, NSF grant CCR- 
+9901011, and NSF ITR grant CCR-0081590. Any opinions, findings, and conclusions contained 
+in this document are those of the authors and do not reflect the views of these agencies. Authors’ 
+addresses: Department of Computer Science, Yale University, P.O. Box 208285, New Haven, CT 
+06511 USA; email: {league, shao, trifonov}@cs.yale.edu. 
+
+Permission to make digital/hard copy of all or part of this material without fee for personal 
+or classroom use provided that the copies are not made or distributed for profit or commercial 
+advantage, the ACM copyright/server notice, the title of the publication, and its date appear, and 
+notice is given that copying is by permission of the ACM, Inc. To copy otherwise, to republish, 
+to post on servers, or to redistribute to lists requires prior specific permission and/or a fee. 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year, Pages 1—39. 
+
+
+
+Report Documentation Page 
+
+Form Approved 
+
+OMB No. 0704-0188 
+
+Public reporting burden for the collection of information is estimated to average 1 hour per response, including the time for reviewing instructions, searching existing data sources, gathering and 
+maintaining the data needed, and completing and reviewing the collection of information. Send comments regarding this burden estimate or any other aspect of this collection of information, 
+including suggestions for reducing this burden, to Washington Headquarters Services, Directorate for Information Operations and Reports, 1215 Jefferson Davis Highway, Suite 1204, Arlington 
+
+VA 22202-4302. Respondents should be aware that notwithstanding any other provision of law, no person shall be subject to a penalty for failing to comply with a collection of information if it 
+does not display a currently valid OMB control number. 
+
+1. REPORT DATE 
+
+2QQ 5 2. REPORT TYPE 
+
+3. DATES COVERED 
+
+4. TITLE AND SUBTITLE 
+
+Type-Preserving Compilation of Featherweight Java 
+
+5a. CONTRACT NUMBER 
+
+5b. GRANT NUMBER 
+
+5c. PROGRAM ELEMENT NUMBER 
+
+6. AUTHOR(S) 
+
+5d. PROJECT NUMBER 
+
+5e. TASK NUMBER 
+
+5f. WORK UNIT NUMBER 
+
+7. PERFORMING ORGANIZATION NAME(S) AND ADDRESS(ES) 
+
+Defense Advanced Research Projects Agency,3701 North Fairfax 
+
+Dr, Arlington,VA,22203-1714 
+
+8. PERFORMING ORGANIZATION 
+
+REPORT NUMBER 
+
+9. SPONSORING/MONITORING AGENCY NAME(S) AND ADDRESS(ES) 
+
+10. SPONSOR/MONITOR'S ACRONYM(S) 
+
+11. SPONSOR/MONITOR'S REPORT 
+NUMBER(S) 
+
+12. DISTRIBUTION/AVAILABILITY STATEMENT 
+
+Approved for public release; distribution unlimited 
+
+13. SUPPLEMENTARY NOTES 
+
+14. ABSTRACT 
+
+see report 
+
+15. SUBJECT TERMS 
+
+16. SECURITY CLASSIFICATION OF: 17. LIMITATION OF 
+
+18. NUMBER 19a. NAME OF 
+
+a. REPORT b. ABSTRACT c. THIS PAGE 
+
+unclassified unclassified unclassified 
+
+39 
+
+
+Standard Form 298 (Rev. 8-98) 
+
+Prescribed by ANSI Std Z39-18 
+
+
+
+
+
+2 
+
+
+Christopher League et al. 
+
+
+encoding object-oriented languages in typed A-calculi [Canning et al. 1989; Bruce 
+1994; Eifrig et al. 1995; Abadi et al. 1996; Bruce et al. 1999], type-preserving 
+compilation alters the requirements in some fundamental ways. The intermediate 
+language must provide simple, orthogonal primitives that are amenable to opti¬ 
+mization. If method invocation is an atomic primitive, for example, then we cannot 
+safely optimize a sequence of calls on the same object. Furthermore, we must avoid 
+introducing any dynamic overhead solely to achieve static typing. One can often, 
+for example, simplify a type system by adding coercion functions or extra indirec¬ 
+tions, but these techniques have associated run-time penalties. The machinery used 
+to achieve static typing should be erasable, meaning that it can be discarded after 
+verification without affecting execution. 
+
+Given these constraints, the type system for the intermediate language should be 
+as simple as possible. Type checking must be not only decidable, but efficient in 
+practice. Typed compilation generally places greater demands on the implementa¬ 
+tion of a type system than does a simple type checker for a source language. On 
+the other hand, at the level of the intermediate language, we can add more detailed 
+and explicit type annotations than a source-level programmer might accept. With 
+respect to object encodings, for example, subsumption is not necessarily required; 
+it can be replaced with explicit coercions as long as their run-time cost is nil. 
+
+Finally, a type-preserving compiler should, where possible, maintain source-level 
+abstractions. Source language type systems enforce certain abstractions (such as 
+private fields and restricted interfaces) which could be eliminated in a translation 
+without compromising type safety. This is dangerous if the translated code will be 
+linked with other code, perhaps translated from a different source language. Link¬ 
+time type checking will not prevent, for example, one module from accessing the 
+private fields of another—unless the abstractions are preserved in the object code. 
+
+We have developed techniques for compiling a significant subset of Java into a sim¬ 
+ple and efficient typed intermediate language [League et al. 1999; 2001b]. Method 
+invocation, after type erasure, has the same operational behavior as a standard im¬ 
+plementation of self application using vtables (per-class tables of functions). Classes 
+inherit or override methods from super classes with no overhead. By pairing an ob¬ 
+ject with a particular view whenever it is cast to an interface type, interface calls 
+are no more expensive than ordinary method calls. We support mutually recursive 
+classes (at the type and term level) while still maintaining separate compilation. 
+Dynamic casts and instance-of queries are implemented as polymorphic methods 
+using tags generated at link-time. Private fields can be hidden from outsiders using 
+existential types. 
+
+Ours is the first efficient encoding of a class-based language into F u without 
+subtyping or bounded quantification. Glew [2000a] compiles a simple class-based 
+calculus using F-bounded quantification. It is not known whether this feature is 
+practical in a production compiler, since the type checker must infer derivations 
+of the subtyping judgments. Fisher and Mitchell [1998] use extensible objects to 
+model class constructs. For efficient implementation, though, these objects must be 
+expressed using simpler primitives. Our intermediate representation uses simple, 
+well-understood extensions: row polymorphism, existential, and recursive types. It 
+is already implemented as part of the Standard ML of New Jersey compiler [Shao 
+and Appel 1995; Shao 1997], and the new Java front end is in active develop- 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+3 
+
+
+CL ::= class C < C {(C f ;)* K M*} 
+
+K ::= C((C f)*) {super(f*); (this.f = f;)*} 
+M ::= C m((C x)*) { t e;> 
+e ::= x | e.f | e.m(e*) | new C(e*) | (C)e 
+
+
+Fig. 1. Syntax of Featherweight Java: classes, constructors, methods, and expressions. 
+
+class Point { 
+int x; 
+
+Point (int x) 
+int getx () 
+
+Point move (int dx) 
+
+Point bump () 
+
+> 
+
+class ScaledPoint < Point { 
+int s; 
+
+ScaledPoint (int x, int s) { super(x); this.s = s; } 
+int gets () { f this.s } 
+
+Point move (int dx) { f new ScaledPoint (this.x + this.s * dx, this.s); } 
+ScaledPoint zoom (int s) { f new ScaledPoint (this.x, this.s * s); } 
+
+> 
+
+
+{ this.x = x; } 
+
+{ f this.x } 
+
+{ f new Point (this.x + dx); } 
+{ f this.move (1); } 
+
+
+Fig. 2. Two classes in Featherweight Java, extended with integers and arithmetic. 
+
+ment [League et al. 2001a]. 
+
+This paper focuses on a formal translation of programs in Featherweight Java 
+(FJ) [Igarashi et al. 1999], a source calculus which models some of the salient 
+features of Java (including classes, fields, methods, and dynamic cast). FJ is small 
+enough to allow detailed proofs of interesting formal properties of the translation, 
+such as type preservation. It also serves as an effective starting point for designing 
+encodings of interesting extensions, such as genericity [Bracha et al. 1998], inner 
+classes [Igarashi and Pierce 2001], and reflection. 
+
+We describe the syntax and semantics of the source and target languages in 
+the next two sections. In section 4, we explain and formalize each aspect of our 
+translation, ultimately proving that it is type-preserving. Section 5 discusses our 
+strategies for implementing certain Java constructs which are not featured in FJ 
+(such as interfaces and privacy). Finally, we contextualize our contribution with a 
+survey of related work in section 6. 
+
+2. SOURCE LANGUAGE 
+
+The source language for our translation is Featherweight Java (FJ), a “minimal core 
+calculus for modeling Java’s type system” [Igarashi et al. 1999]. FJ is small enough 
+that perspicuous formal translation and detailed proofs are possible. Figure 1 
+contains the syntax of FJ; figure 2 illustrates some of the features of FJ with two 
+sample classes. 
+
+Class declarations (CL) contain the names of the new class and its super class, 
+a sequence of field declarations, a constructor (K), and a sequence of method dec- 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+4 
+
+
+Christopher League et al. 
+
+
+Kinds k, ::= Type | R L | k,=>k' \ {(1::k)*} 
+
+Types t a \ X olv.k.t \ r r r | {(l = r )*} | r-l \ r — >r' \ Abs L \ | {r} | [r] 
+
+| fiav.K.r | Vq;::k.t | 3cx::k. t 
+
+Selectors s ::= o | s-l 
+
+Terms e x \ Xx : r. e | e e' | A olv.k. e \ e [r] | inj^ e | case e of (l x => e)* else e 
+| •[(/ =: e)*} | e.l | fix [r] e | {olv.k, = r, e : r') \ open e as {av.K, xir) in e' 
+| fold e as fiav.K. r at Xjv.k. s[ 7 ] | unfold e as fiav.K. r at X r yv.K. s[ 7 ] 
+
+| abort [t] 
+
+
+Fig. 3. Syntax of the target language. 
+
+
+ll :ti, :t„ = h : n ; ...l n -.T n ; Abs {il — 
+
+
+1 = {Abs 0 } 
+
+maybe = Ao;::Type. [some : a , none : 1] 
+some = Ao::Type. Xx : a. injJJ^g 6 “ x 
+none = Aa::Type. inj^ 0 a „ y e be “ {} 
+
+let x : t = e in e! = (A.t : r. e') e 
+
+
+Fig. 4. Derived syntactic forms of the target language. 
+
+
+larations (M). We use letters A through E to range over class names, f and g to 
+range over field names, m over method names, and x over other variables. There 
+are five forms of expressions: variables, field selection, method invocation, object 
+creation, and cast. A program (CT, e) consists of a fixed class table, CT, mapping 
+class names to declarations, and a main program expression e. 
+
+There are no assignments, interfaces, super calls, exceptions, or access control 
+in FJ. Constructors always take all the fields as arguments, in the same order that 
+they are declared in the class hierarchy. FJ permits recursive class dependencies 
+with the full generality of Java. A class can refer to the name and constructor of 
+any other class, including its sub-classes. While this does not complicate the FJ 
+semantics, it is one of the major challenges of our translation. 
+
+For reference, we reprint the semantics of FJ in appendix A. They begin by 
+defining three relations. The subtype relation <: is the reflexive, transitive closure 
+of the relation defined by the super class declarations (class C < B). The relation 
+fields( C) returns the sequence of all the fields found in objects of class C. The 
+relation mtype{ m, C) finds the type signature for method m in class C by searching 
+up the hierarchy. Type signatures have the form Di... D„->Do. 
+
+The expression typing rules govern judgments of the form T h e £ C, meaning 
+that FJ expression e is of type C in context T. The operational semantics are given 
+by three primitive reduction rules and the expected congruence rules. Since there 
+are no side effects, evaluation order is unspecified. The FJ type system is sound 
+and decidable. Please see the appendix for the rules, or [Igarashi et al. 1999] for 
+further explanation. 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+5 
+
+
+Pack and open for existential types: 
+
+h r :: Type $ h t 7 :: k 
+
+$;Ahe: r[a := r'] 
+
+$;Ah {a::K = r', e : r) : 3a::n. t 
+
+
+(i) 
+
+
+$;Ahe: 3a::K. r $ h r 7 :: Type 
+<F, a :: k,; A, x : r h e': r' 
+
+$;Ah open e as (a::K, x:r) in e': r' 
+Recursive record term: 
+
+$;Ahe: {r}— 
+
+$;Ah fix [r] e : {r} 
+
+
+( 2 ) 
+
+(3) 
+
+
+Row and record types: 
+
+h <f> kind env 
+$ h Abs L :: R L 
+
+
+(4) 
+
+
+$ h r :: Type $ h r' :: R iu W 
+<t> h :: R^-W 
+
+
+(5) 
+
+
+$ h r :: R® 
+h {r} :: Type 
+
+
+(6) 
+
+
+Sum type, its introduction and elimination: 
+
+<f> h T :: R® 
+
+$ h [r] :: Type 
+
+
+$ H [Zl : Tl ; r n ; r] :: Type i;Ahe:ri 
+
+<E>; A h inj^ 1 ■ T1 T " > T 1 e : pi : n ; .. T„ : r„ ; r] 
+
+^ = Ij, => j = ? (Vj, j' S {1... m}) 
+
+A h e : pi : ri ; i n : r n ; r] <t>; A h e': r' 
+
+3i £ {1. .. n} : i; = Z' and <E>; A, Xj : n \~ ey : t' (Vj £ {1... m}) 
+
+$;Ah case e of (/'. xj => ej) J ’ 6 I 1 --- m l else e! : r' 
+
+Fold and unfold for recursive types: 
+
+■f>, a :: k h r :: k <t> h r s :: K=^Type <f>; A h e : r s (r[a := fj,a::n. r]) 
+<f>; A h fold e as \txx\\K. r at r s : r s r) 
+
+
+(8) 
+
+
+(9) 
+
+
+( 10 ) 
+
+
+<f>, a :: K I- r :: K $ h r s :: fc=>Type $;Ahe:r s ( not::n. r) 
+<t>; A h unfold e as nav.K. r at t s : r s (r[a := r]) 
+
+
+( 11 ) 
+
+
+Fig. 5. Selected typing rules for the target language. The judgments represented are type forma¬ 
+tion <f> h r :: k, and term formation <f>; A h e : r, where <f> maps type variables to their kinds and 
+A maps term variables to their types. 
+
+
+3. TARGET LANGUAGE 
+
+The target language of our translation is the higher-order polymorphic A-calculus 
+Fjj [Girard 1972; Reynolds 1974] extended with existential types [Mitchell and 
+Plotkin 1988], row polymorphism [R.erny 1993], ordered records, sum types, re¬ 
+cursive types, and a term-level fixpoint for constructing recursive records. The 
+syntax appears in figures 3 and 4. Typing rules for the non-standard features are 
+given in figure 5; the remaining rules are in appendix B. 
+
+Fu is an explicitly-typed calculus, with type annotations on function arguments 
+and type applications for instantiating polymorphic functions. Type is the base 
+kind of types which classify terms. The arrow kind classifies type functions. 
+
+A polymorphic array constructor, for example, would have kind Type=>Type. The 
+form \a::n. r introduces the arrow kind, and r t' eliminates it. That is, (Aqi::k. t) t' 
+is well-formed if t' has kind k. It is equivalent to r[a := t’] , which denotes the 
+capture-avoiding substitution of r' for a in r. Labeled tuples of types are enclosed in 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+6 
+
+
+Christopher League et al. 
+
+
+braces {l = r ...} and have tuple kinds {r:: k ...}. The mid-dot syntax t-1 denotes 
+selection of a type from a tuple. 
+
+The single arrow r—>r' is the type of a function expecting an argument of type 
+r and returning a result of type t' . Our implementation supports multi-argument 
+functions, but in this presentation, for simplicity, we simulate them using curried 
+arguments (int — dnt — dnt). Anonymous functions are written using the boldface 
+lambda, as in Xx :r.e. Juxtaposition of terms (e e') indicates applying function 
+e to argument e'. Polymorphic functions are introduced by the capital lambda 
+(Aa::s.e) which binds a in e. This term has type Va::K. r, where e has type r 
+and a may appear in r. Thus, the polymorphic identity function is written as 
+id = AoxType. \x::a. x and has type Va::Type. a—*a. An application of id to the 
+integer 3 is written id [int] 3. 
+
+The term abort [r] represents a runtime error that otherwise would have produced 
+a value of type r. We use this to model a failed dynamic cast. In the operational 
+semantics, evaluating abort [r] produces an infinite loop. In a real system, abort 
+would correspond to throwing an exception. 
+
+Following Rerny [1993] we introduce a kind of rows R L , where L is the set of labels 
+banned from the row. Abs L is an empty row of kind R L , and 1:t;t' prepends a 
+field with label l and type r onto the row t' . The row formation rules (4) and (5) 
+prohibit duplicate labels: a type variable a of kind cannot be instantiated 
+with a row in which the label m is already bound. Boldface braces {•} denote the 
+type constructor for records; it lifts a complete row type (of kind R®) to kind Type. 
+Record terms are written as a sequence of bindings in braces: {l\—e, Z 2 = e,}. 
+Permutations of rows are not considered equivalent — the labels are used only for 
+readability. This means that record selection e.l can be compiled using offsets 
+which are known at compile-time. We sometimes use commas and omit Abs L when 
+specifying complete rows (see the derived forms in figure 4). We let 1 (read ‘unit’) 
+denote the empty record type. Row kinds can be used to encode functions which 
+are polymorphic over the tail of a record argument. For example, the function 
+Ap::R^. Ax :{l: string; p}. print x.l can be instantiated and applied to any record 
+which contains a string l as its first field. 
+
+Existential types (3 a::n. r) support abstraction by hiding a witness type. They 
+are introduced at the term level by a package (olv.k — t , e:r'), where r is the 
+witness type (of kind k) and e has type r'[a := t\. The existential is eliminated 
+(within a restricted scope) by open; see rules (1) and (2). 
+
+Labeled sum types are constructed by enclosing a complete row within boldface 
+brackets: [•]. Sum types are introduced by a term-level injection and eliminated by 
+an ML-like case statement; see rules (8) and (9). Figure 4 defines a parameterized 
+type maybe with constructors some and none. 
+
+Recursive types are mediated by explicit fold and unfold terms. These so-called 
+iso-recursive types (a term first used by Crary et al. [1999]) simplify type checking, 
+but are less flexible than equi-recursive types unless the calculus is equipped with 
+a definedness logic for coercions [Abadi and Fiore 1996]. Since we use recursive 
+types at higher kinds, the syntax for folding and unfolding them deserves some 
+explanation. Suppose we wish to encode the following mutually recursive type 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+7 
+
+
+abbreviations: 
+
+type even = maybe {hd : int, tl: odd} 
+type odd = {hd : int, tl: even} 
+
+The solution is expressed as the fixpoint over a tuple: 
+
+t = ;Lta::{even :: Type, odd :: Type}. 
+
+{even = maybe {hd : int, tl: ct-odd}, 
+odd = {hd : int, tl: coeven}} 
+
+Now, the two recursive types are expressed as f-even and t-odd. There are, however, 
+no type equivalence rules for reducing t-even; a term having this type must first be 
+coerced to a type in which t is unfolded. We allow unfolding of recursive types within 
+a tuple by specifying a selector after the at keyword. Selectors are syntactically 
+restricted to a (possibly empty) sequence of labeled selections from a tuple. The 
+syntax A 7 ::k. s[y] allows identity (A 7 ::k. 7 ), one selection (A 7 ::k. y-Zi), two selections 
+(Ay::K. y-Zi-^), and so on. The formation rules ( 10 ) and ( 11 ) further restrict the 
+selectors to have a result of kind Type. Thus, if e has type t-odd, then the expression 
+
+unfold e as t, at Ay::{even :: Type, odd :: Type}, y-odd 
+
+has type {hd : int, tl: t-even}. For recursive types of kind Type, the only allowed 
+selector is identity, so we omit it. We sometimes also omit the as annotation where 
+it can be readily inferred. 
+
+The typing judgments are decidable, and the type system is sound with respect to 
+a structured operational semantics. We sketch the decidability proof in section B.2, 
+and give a detailed soundness proof in section B.4. The target language also enjoys 
+a type erasure property: type manipulations ( e.g ., type abstractions, folds, pack, 
+and open) can be erased before runtime without affecting the result. 
+
+4. TRANSLATION 
+
+Each FJ class is separately compiled into a closed F^term which imports the types, 
+method tables, and constructors of other classes and produces its own method table 
+and constructor. The compilation units are then instantiated and linked together 
+with a term-level fixpoint constructor. 
+
+We begin by describing and formalizing our basic object encoding in sections 4.1 
+and 4.2. In section 4.3, we give a type-directed translation of FJ expressions. In¬ 
+heritance, overriding, and constructors are examined as part of the class encoding 
+in section 4.4, formalized in section 4.5. Finally, section 4.6 covers linking and 
+section 4.7 discusses separate compilation. Many aspects of the translation are 
+mutually dependent, but we believe this ordering yields a reasonably coherent ex¬ 
+planation. 
+
+4.1 Object encoding 
+
+The standard explanation of method invocation in terms of records and fields uses 
+self-application [Kamin 1988]. In a class-based language, the object record contains 
+values for all the fields of the object plus a pointer to a record of methods, called 
+the vtable. The vtable of a class is created once and shared among all objects of the 
+class. The methods in the vtable expect the object itself as an argument. Suppose 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Christopher League et al. 
+
+
+class Point has one integer field x and one method getx to retrieve it. Ignoring 
+types for the moment, the term po = {vtab = {getx = Aself. (self.x)}, x = 42} could 
+be an instance of class Point. The self-application term po .vtab.getx po invokes the 
+method. 
+
+What type can we assign to the self argument? The typing derivation for the 
+self-application term forces it to match the type of the object record itself. That 
+is, well-typed self-application requires that po have type r where 
+
+r = {vtab : {getx: r—Hnt}, x: int} 
+
+Because r appears in its own definition, the solution must involve a fixpoint. The 
+recursive types in our target language will suffice if augmenting the code with fold 
+and unfold annotations allows for a proper typing derivation. Let the type of self 
+be 
+
+T pt = /iself::Type. {vtab : {getx: self—Hnt}, x:int} 
+
+Happily, by unfolding the argument self and folding the object we obtain the term 
+pi = fold {vtab = {getx = Aself: r pi . (unfold self).x}, x = 42} 
+
+Tpt 
+
+which is well-typed, as is the augmented self-application term (unfold pi). vtab.getx p\. 
+
+Suppose class ScaledPoint extends Point with an additional field and method. 
+The type of an object of class ScaledPoint would be: 
+
+T sp = /iself::Type. {vtab : {getx: self—dnt, gets: self—Hnt}, x:int, s:int} 
+
+How can we relate the types for objects of these two classes? More to the point, how 
+can we make a function expecting a Point accept a ScaledPoint? Traditional models 
+employ subsumption, but r sp is not a subtype of T pt , so other arrangements must 
+be made. Can the subclass relationship be encoded using explicit (but erasable) 
+type manipulations? 
+
+Java programmers distinguish the static and dynamic classes of an object— 
+declared types indicate static classes; constructors provide dynamic classes. Static 
+classes of a given object differ at different program points; dynamic classes are un¬ 
+changing. Static classes are known at compile-time; dynamic classes are revealed 
+at run-time only by reflection and dynamic casts. 
+
+We implement this distinction via a pair of existentially-quantified rows. Some 
+prefix of the type of the object record is known; the rest is hidden, abstract. Con¬ 
+sider this static type of a Point object: 
+
+Tp t = 3tail::{f:: R {vtab ' x} , m :: Type=»R {getx} }. 
+
+/rself. {vtab: {getx: self—Hnt; tail-m self} ; x: int; tail-f} 
+
+The f component of the tuple tail denotes a hidden row missing the labels vtab and 
+x. Subclasses of Point append new fields by packaging non-empty rows into the 
+witness type. Similarly, tail contains a component m for appending new methods 
+onto the vtable. This component is a type operator expecting the recursive self 
+type, so that it can be propagated to method types in the dynamic class. The 
+Point object pi can be packaged into a term of type r pt using the trivial witness 
+type {f= Abs^ vtab ’ x ^, m = As::Type. Abs^ getx ^}. To package an object of dynamic 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+9 
+
+
+class ScaledPoint into type r' pt we hide a non-trivial witness type, containing the 
+new field and method: 
+
+{f=(s:int;Abs {vtab ’ x ’ s} ), 
+m = Aself::Type. (gets: self—dnt; Abs^ getx ' gets ^)} 
+
+Now, objects of different dynamic classes can be repackaged into the type of a 
+common super class. 
+
+This is, in essence, the object encoding we use to compile Java. Before embarking 
+on the formal translation, we must explore one more aspect: recursive references. 
+Suppose the Point class has also a method bump which returns a new Point. The 
+type of objects of class Point must then refer to the type of objects of class Point. 
+This recursive reference calls for another fixpoint, outside the existential: 
+
+/itwin. 3tail. /rself. {vtab : {getx: self—dnt; bump : self—rtwin ; tail-m self}; 
+x : int ; tail-f} 
+
+Using self as the return type would overly constrain implementations of bump, 
+forcing them to return objects of the same dynamic class as the receiver. In Java, 
+type signatures constrain static classes only. Because twin is outside the existential, 
+its witness type can be distinct from that of self. 
+
+We used this technique in [League et al. 1999] to explain self-references, but Java 
+supports mutually recursive references as well. Suppose class A defines a method 
+returning an object of class B, and vice versa; ignoring fields entirely for a moment, 
+define the type 
+
+AB = /rw::{A :: Type, B::Type}. 
+
+{A = 3tail::Type=>R^ getb ^. /.tself::Type. {getb: self—>w-B ; tail self}, 
+
+B = 3tail::Type=f>R^ geta ^. /.tself::Type. {geta : self—>-w-A; tail self}} 
+
+Using the contextual fold and unfold described earlier, objects of class A can be 
+folded into the type AB-A. This is the natural generalization of the twin fixpoint. 
+In the most general case, any class can refer to any other; thus, w must expand to 
+include all classes. This is the technique we use in the formal translation. In a real 
+compiler, we would analyze the reference graph and cluster the strongly-connected 
+classes only. Note that this only addresses the typing aspect; mutual recursion also 
+has term-level implications (any class can construct objects of or downcast to any 
+other—see section 4.4) as well as interactions with privacy—see section 5. 
+
+4.2 Type translation 
+
+This completes our informal account of the object encoding; we now turn to a 
+formal translation of FJ types. Figure 6 defines several functions which govern the 
+layout of fields and methods in object types. Square brackets [•] denote sequences. 
+The sequence Si -H- S 2 is the concatenation of sequences Si and S 2 - |s| denotes 
+the number of elements in s. The domain of a sequence of pairs dom(s) is a set 
+consisting of the first elements of each pair in s. 
+
+The function fieldvec maps a class name C to a sequence of tuples of the form 
+(f, D), indicating a field of type D named f—except for the first tuple in the sequence, 
+which is always (vtab, vt), a placeholder for the vtable. Each class simply appends 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+10 
+
+
+Christopher League et al. 
+
+
+fieldvec( Obj) = [(vtab,i;t)] 
+
+CT( C) = class C <] B {Di f i; . . . D m f m ; K .. . > 
+fieldvec( C) = fieldvec(B) ++ [(f i, Di)... (f m ,D m )] 
+
+methvec( Obj) = [(dyncast, dc)\ 
+
+CT( C) = class C < B { . . . K Mi .. . M m > 
+methvec(C) = methvec(B) ++ addmeth( B, [Mi ... M m ]) 
+
+(m, _) G methvec( B) 
+
+addmeth( B, [D m(Di xi...x*.) { ... } M2 ... M m ]) = addmeth( B, [M2 ... M m ]) 
+(m, _) 0 methvec(B) 
+
+addmeth( B, [D m(Di xi ... D& x*.) { ... } M2 ... M m ]) = 
+
+[(m, Di ... Dfc->D)] -H- addmeth( B, [M2 ... M m ]) 
+
+addmeth( B, []) = [] 
+
+
+( 12 ) 
+
+(13) 
+
+(14) 
+
+(15) 
+
+(16) 
+
+(17) 
+
+(18) 
+
+
+Fig. 6. Field and method layouts for object types. 
+
+
+its own fields onto the sequence of fields from its super class. (In FJ, the fields of 
+a class are assumed to be distinct from those of its super classes.) 
+
+The layout of methods in an object type is somewhat trickier. Methods that 
+appear in a class definition are either new or they override methods in the super 
+class. Overriding methods do not deserve a new slot in the vtable. The function 
+methvec maps a class name C to a sequence of tuples of the form (m, T), indicating 
+a method named m with signature T. Signatures have the form Di... D„->D. The 
+helper function addmeth iterates through all the methods defined in the class C, 
+adding only those methods that are new. The first tuple in methvec is always 
+(dyncast, dc), a pseudo-method used to implement dynamic casts. 
+
+Let cn denote the set of class names in the program of interest, including Obj. 
+For the purpose of presentation, we abbreviate the kind of a tuple of all object 
+types as ken. The tuple of row kinds for class C is abbreviated ktail [C]. 
+
+ken = {(E :: Type) Eec "} 
+
+ktail [C] = {m :: Ty pe^ R^m(methvec(C )), f .. R do m (fieldvec(C)) | 
+
+For brevity, we sometimes omit kind annotations. By convention, certain named 
+type variables are bound by particular kinds — w has kind ken, self and u have kind 
+Type, and tail has kind ktail[ C], where C should be evident from the context. 
+
+In figure 7 we define Rows, a type operator that produces rows containing the 
+fields and methods introduced between two classes in a subclass relationship. In¬ 
+tuitively, f?oms[C,A] includes fields and methods in class C but not in its ancestor 
+class A. Earlier we described how to package dynamic classes into static classes; the 
+witness type was a tuple of rows containing the fields and methods in the dynamic 
+class but not in the static class. This is just one use of the Rows operator. 
+
+The type operator i?ows[C,A] has kind kcn=>Type=>ktail[C]=>ktail[A], Its first 
+argument, w ::kcn, is a tuple containing object types for all classes in the compilation 
+unit. The next argument, u::Type, is a universal type used to implement dynamic 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java • 11 
+
+Jtor«s[C,C] = Xw.-.kcn. Au::Type. Xta\\:-.ktail[C]. tail (19) 
+
+itoi«s[0bj, T] = Xw.-.kcn. Au::Type. Atail::fetai([Obj]. 
+
+{m = Aself::Type. (dyncast: self—>Va::Type. (u—unaybe a )—>maybe a ; tailm self) (20) 
+f = ta i I-f} 
+
+CT(C) = class C < B {Di f 1 . .. D n f „ K Ml .. . M m > 
+i?oms[B, A] = r addmeth(B, [Mi .. ,M m ]) = f(ii, Ti)... (l m ,T m )] 
+i?oms[C, A] = Xw.-.kcn. Au::Type. Atail::fctaiZ[C], 
+
+
+r w u {m = Aself::Type. (ii : Tj/[self; w; Ti] ; ... l m : T?/[self; w; T m \; tail m self), 
+f = (f i : w-Di ; ... f n : w-D„ ; tail-f)} 
+
+Ty[self; w; Di ... D n ->D] = self—*-w-Di——>w-D (22) 
+
+
+Empty[ C] = {m = Aself::Type. Abs dom ( meftaec ( c )), f = Abs dom (- fleW, ' ec ( c ))} 
+ObjRcd[ C] = Xw.-.kcn. Au::Type. Atail::fctai2[C], Aself::Type. 
+
+{vtab : {(i?oi«s[C, T] w u tail)-m self} ; (Rows[C, T] w u taiI)-f } 
+SelfTy[C] = Xw.-.kcn. Au::Type. Atail::fctaii[C]. /iselfuType. ObjRcd[ C] w u tail self 
+ObjTy[C] = Xw.-.kcn. Au::Type. 3tail::fetaii[C]. SelfTy[C] w u tail 
+World = Au::Type. pw.-.kcn. {(E= ObjTy[ E] w u) EecI> } 
+
+Fig. 7. Macros for object types. 
+
+
+casts. This will be explained in section; for now, we only observe that the macros in 
+figure 7 simply propagate u so that it can appear in the type of the dyncast pseudo¬ 
+method. The final argument, ta\\::ktail[C], contains the rows for some subclass of 
+
+C. 
+
+.Rows[C, A] is defined by three cases. First, if C and A are the same class, then 
+the result is just the tail -those members in subclasses of C. Second, if C is Obj 
+(the root of the class hierarchy) and A is the special symbol T then the result is 
+the members declared in Obj. Treating T as the trivial super class of Obj permits 
+more uniform specifications (since Obj contains members of its own). Finally, in the 
+inductive case (where C <: A) we look to C’s super class—let’s call it B. Rows [B,A] 
+produces a type operator for the members between B and A; we need only append 
+the new members of C. Conveniently, Rows[B,A] has a tail parameter specifically 
+for appending new members. 
+
+The new fields in C are precisely those listed in the declaration of C; we fetch 
+their types from w and append tail-f. The new methods in C are found using 
+addmeth, and their type signatures Di...D„->D are translated to arrow types 
+self—>-w-Di —*■... w-D„—>-w-D. We use curried arguments for convenience; an imple¬ 
+mentation would use multi-argument functions instead. As shown in the informal 
+examples, the row for methods is parameterized by the type of self. 
+
+Also in figure 7, we use the Rows operator to define macros for several variants of 
+the object type for any given class. Empty [ C] denotes the tuple of empty field and 
+method rows of kind ktail [C]. ObjRcd[ C] assembles the rows into records, leaving the 
+subclass rows and self type open. SelfTy [C] closes self with a fixpoint, and ObjTy[ C] 
+hides the sublass rows with an existential. Each of these variants is used in our 
+term translation. All of them remain abstracted over both w (the types of other 
+objects) and u (the universal type, which is simply propagated into the type of 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+12 
+
+
+Christopher League et al. 
+
+
+pack[C; u; tail; e] = 
+
+fold (ta\\ r ::ktail[C] = tail, e: SelfTy[ C] (World u) u tail 7 ) 
+as World u at X^wkcn.^-C 
+
+
+UPCASt[C; A; u; e] = 
+
+open (unfold e as World u at Xj::kcn. 7 -C) as (ta\\::ktail[C], x: SelfTy[ C] (World u) u tail) 
+in PACK[A; u; Rows[ C, A] ( World u) u tail; x] 
+
+Fig. 8 . Macros for pack and upcast transformations. 
+
+
+EXP[r; u; classes; x] = x 
+
+
+(var) 
+
+
+(f, _) G fieldvec( C) Th e 6 C EXP[r; u; classes; e] = e 
+
+EXP[r; u; classes; e. f ] = 
+
+open (unfold e as World u at A7. 7-C) as (tail, x : SelfTy[ C] (World u) u tail) 
+
+in (unfold x).f 
+
+
+(field) 
+
+
+r h e G C (m, Bi ... B n ->B) G methvec{ C) EXP[r ; u; classes; e] = e 
+r h e* G Di D^CrB* UPCASt[D^; B^; u; EXp[T; u; classes; e^]] = ei, i G {l..n} 
+
+EXP[r; u; classes; e .m(ei .. . e n )] = 
+
+open (unfold e as World u at A 7 . 7 -C) as (tail, x: SelfTy[ C] ( World u) u tail) 
+in (unfold x).vtab.m x e\ ... e n 
+
+
+(invoke) 
+
+
+fields( C) = Bi f 1 ... B n f n 
+
+n- e, G Di D^<:Bi UPCAST[Di; B*; u; EXP[r; u; classes; e^]] = e^, i G {l..n} 
+EXP[r; u; classes; new C(ei ... e n )] = (classes.C {}).new ei ... e n 
+
+
+(new) 
+
+
+r h e G D Dec 
+
+EXP[r; u; classes; (C)e] = UPCASt[D; C; u; EXP[r; u; classes; e]] 
+
+TheGC D<:C EXP[r; u; classes; e] = e 
+
+EXP[F; u; classes; (D)e] = 
+
+open (unfold e as World u at A 7 . 7 -C) as (tail, x : SelfTy[ C] (World u) u tail) 
+in case (unfold fc).vtab.dyncast x [(World u)-D] (classes.D {}).proj 
+of some y =>• y else abort [(World u)-D] 
+
+
+(upcast) 
+
+
+(dncast) 
+
+
+Fig. 9. Type-directed translation of FJ expressions. 
+
+
+dyncast). Finally, World constructs a package of the types of objects of all classes, 
+given the universal type u; as we will see later, the actual universal type is a labeled 
+sum of object types, and is defined recursively using World. 
+
+4.3 Expression translation 
+
+Equipped with an efficient object encoding and several type operators for describing 
+it, we now examine the type-directed translation of FJ expressions. Figures 8 and 9 
+contain term macros PACK and UPCAST, and six rules governing the judgment 
+exp[T; u; classes; e] = e for term translation. T is the FJ type environment, u is 
+the universal sum type, classes is a record containing the runtime representations 
+of each class, e is an FJ expression, and e is its corresponding term in the target 
+language. If e has type C, then its translation e has type (World u)-C (Theorem 5). 
+The PACK macro packages and folds a recursive record term into a closed, com- 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+13 
+
+
+plete object whose type is selected from a mutual fixpoint of the types of objects 
+of all classes. Supposing that tail is some row tuple in ktail[ C] and e has type 
+SelfTy[ C] (World u) u tail, the term PACK[C; u; tail; e] has type ( World u)-C. Since 
+unpacking an object binds a type variable to the hidden witness type, it is not as 
+convenient to define as a macro, and we perform it inline instead. 
+
+The UPCAST macro opens a term representing an object of class C and repackages 
+it as a term representing an object of some super class A. The object term e has 
+type ( World u)-C where C <: A, but dynamically it might belong to some subclass 
+D <: C. The open binds the type variable tail to the hidden row types that represent 
+members in D but not in C. The UPCAST macro then uses Rows to prefix tail with 
+the types of members in C but not in A. Finally, UPCAST calls on the PACK macro 
+to hide the new tail, yielding an object term of type ( World u)-A. 
+
+These macros simply and effectively formalize the encoding techniques demon¬ 
+strated in the previous section. Importantly, they use type manipulations only 
+(fold, unfold, open). Since these operations are erased before runtime, the PACK 
+and UPCAST macros have no impact on performance. 
+
+We now explain each of the translation rules in figure 9, beginning with (var). 
+Variables in FJ are bound as method arguments. Methods are translated as cur¬ 
+ried abstractions binding the same variable names. Therefore, variable translation 
+(var) is trivial. An upcast expression (C)e (where T h e £ D and D <: C) is also 
+trivial; the rule (upcast) delegates its task to the macro of the same name. 
+
+The field selection expression e. f translates to an unfold-open-unfold-select idiom 
+in the target language (field). In this sequence, the select alone has runtime effect. 
+Method invocation e.m(ei...e n ) augments the idiom with applications to self and 
+the other arguments, but there is one complication. The FJ typing rule permits 
+the actual arguments to have types that are subclasses of the types in the method 
+signature. Since our encoding does not utilize subtyping, the function selected 
+from the vtable expects arguments of precisely the types in the method signature. 
+Therefore, we must explicitly upcast all arguments. Rule (invoke) formalizes the 
+self-application technique demonstrated earlier. 
+
+The code to create a new object of class C essentially selects and applies C’s 
+constructor from the classes record. Until we explain class encoding and linking, 
+the type of classes will be difficult to justify. Presently it will suffice to say that 
+classes. C applied to the unit value {} returns a record which contains a field new— 
+the constructor for class C. The translation (new) upcasts all the arguments, then 
+fetches and applies the constructor. 
+
+The final case, dynamic casts, may appear quite magical until we reveal the 
+implementation of the dyncast pseudo-method in the next section. For now it is 
+enough to treat dyncast as a function of type self —>-Va. (u— Mnaybe a) — miaybe a, 
+where self is the type of the unfolded unpacked object bound to x. The argument 
+of (unfold x). vtab.dyncast x [r] is a projection function, attempting to convert a 
+value of type u to an object of type r. The record classes. C {} contains, in addition 
+to the field new, a proj field of type u —Mnaybe ((World u) -C). Thus if we select the 
+dyncast method from an object, instantiate it with the object type for some class 
+C, then pass it the projection for class C, it will return some C object if the cast 
+succeeds, or none if it fails. In case of failure, evaluation aborts. In full Java, we 
+would throw a ClassCast exception. 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+14 
+
+
+Christopher League et al. 
+
+
+Note that Featherweight Java’s stupid casts [Igarashi et al. 1999] are not compiled 
+at all. They arise in intermediate results during evaluation, but should not appear 
+in valid source-level programs. 
+
+The expression translation judgment exp preserves types. Informally, if e has 
+type C, then its translation has type (World u)-C (for some type u). To state this 
+property formally, we must first translate a FJ typing environment T: 
+
+ENV[u; r, x : D] = ENV[u; F], x : (World u)-D 
+env[u; o] = o 
+
+It is easy to show by induction that env[u; T] is a well-formed environment, assum¬ 
+ing that the range of T is a subset of cn. We are now prepared to state formally 
+the type preservation theorem: 
+
+Theorem 1 (Type preservation). If $ b u :: Type, 
+
+<F; A b classes: {Classes (World u) u} and T b e G C, then 
+<F; A, ENV[u; T] b exp[T; u; classes; e] : (World u)-C. 
+
+The detailed proof is in appendix C, but here is an overview. It proceeds by 
+induction on the structure of e. All cases are straightforward if we factor out and 
+prove several properties as lemmas. First, we must establish a correspondence be¬ 
+tween the fields used in the FJ semantics and the fieldvec relation used for object 
+layout (likewise between mtype and methvec). Second, we must establish the corre¬ 
+spondence between pairs in fieldvec (or methvec ) and elements in Rows. All these 
+correspondences are proved by induction on the class hierarchy. Finally, we must 
+show that the PACK and UPCAST macros return expressions of the expected type. 
+These can be proved by inspection, but the latter argument requires a non-trivial 
+coherence property for Rows. 
+
+4.4 Class encoding 
+
+Apart from defining types, classes in FJ serve three other roles: they are extended, 
+invoked to create new objects, and specified as targets of dynamic casts. In our 
+translation, each class declaration is separately compiled into a module exporting 
+a record with three elements—one to address each of these roles. We informally 
+explain our techniques for implementing inheritance, constructors, and dynamic 
+casts, then give the formal translation of class declarations. 
+
+In a class-based language, each vtable is constructed once and shared among all 
+objects of the same class. In addition, the code of each inherited method should be 
+shared by all inheritors. How might we implement the Point methods so that they 
+can be packaged with a ScaledPoint? We make the method record polymorphic 
+over the tail of the self type: 
+
+dictPT = Ata\\::ktail[PT}. {getx = Aself: s pt . (unfold self).x} 
+
+where s p t = pa. {vtab : {getx : a —dnt; tail-m a} ; x : int; tail-f} 
+
+We call this polymorphic record a dictionary. By instantiating it with different 
+tails, we can directly package its contents into objects of subclasses. Instantiated 
+with empty tails ( e.g., Empty[ PT] ), this dictionary becomes a vtable for class Point. 
+Suppose the ScaledPoint subclass inherits getx and adds a method of its own. Its 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+15 
+
+
+dictionary would be: 
+
+dictSP= Atail::fciaiZ[SP]. {getx= (dictPT [r SJ ,]).getx, 
+
+gets = Aself: s sp . (unfold self).s} 
+
+where r sp = i?ows[SP, PT] ( World u) u Empty[SP] 
+
+and s sp = pa. {vtab : {getx: a— dnt ; gets: a— dnt ; tail-m a} ; 
+x: int ; s: int ; tail f} 
+
+This dictionary can be instantiated with empty tails to produce the ScaledPoint 
+vtable. With other instantiations, further subclasses can inherit either of these 
+methods. The dictionary is labeled diet in the record exported by the class trans¬ 
+lation. 
+
+Constructors in FJ are quite simple; they take all the fields as arguments in the 
+correct order. Fields declared in the super class are immediately passed to the 
+super initializer. We translate the constructor as a function which takes the fields 
+as curried arguments, places them directly into a record with the vtable, and then 
+folds and packages the object. The constructor function is labeled new in the class 
+record. In section 5, we describe how to implement more realistic constructors. 
+
+Implementing dynamic cast in a strongly-typed language is challenging. Some¬ 
+how we must determine whether an arbitrary, abstractly-typed object belongs to 
+a particular class. If it does belong, we must somehow refine its type to reflect 
+this new information. Exception matching in SML poses a similar problem. To 
+address these issues, Harper and Stone [1998] introduce tags —values which track 
+type information at runtime. If a tag of abstract type Tag a equals another tag of 
+known type Tag r, then we update the context to reflect that a = r. Note that this 
+differs from intensional type analysis [Harper and Morrisett 1995], which performs 
+structural comparison and does not distinguish named types. 
+
+Tags work well with our encoding; in an implementation that supports assign¬ 
+ment and an SML front-end, it may be a good choice. In this formal presentation, 
+however, type refinement complicates the soundness proof and the imperative na¬ 
+ture of maketag constrains the operational semantics, which is otherwise free of 
+side effects, maketag implements a dynamically extensible sum, which is needed for 
+SML exceptions, but is overkill for classes in FJ. 
+
+We propose a simpler approach, which co-opts the dynamic dispatch mechanism. 
+The vtable itself provides a kind of runtime class information. A designated method, 
+if overridden in every class, could return the receiver at its dynamic class or any 
+super class. We just need a runtime representation of the target class of the cast, 
+and some way to connect that representation to the corresponding object type. For 
+this, we can use the standard sum type and a ‘one-armed’ case. Let u be a sum 
+type with a variant for each class in the class table. The function 
+
+Ax: u. case x of C y =$■ some [ObjTy[ C] ( World u) u] y 
+else none [ObjTy[C] ( World u) u ] 
+
+could dynamically represent class C. To connect it to the object type, we make the 
+dyncast method polymorphic, with the type 
+
+self— >Va. (it— miaybe a) — >-maybe a 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+16 
+
+
+Christopher League et al. 
+
+
+Dict[ C] = Xw.-.kcn. Au::Type. Aself::Type. {(_Ror«s[C, T] w u Empty[ C])-m self} 
+
+Ctor[ C] = Awufccn.w Di —*■... w-D„—*-w-C 
+where fields(C) = Di f i ... D n f n 
+Proj[ C] = Xw.-.kcn. Au::Type. u—uriaybe w-C 
+
+Inj[C] = Xw.-.kcn. Au::Type. w-C —hj 
+
+Class [C] = Xw.-.kcn. Au::Type. {diet: Vtail:: ktail [C], Dict[C\ w u (SelfTy[C\ w u tail), 
+
+proj: Proj[C] w u, new: Ctor\C\ w} 
+
+Classes = Xw.-.kcn. Au::Type. ((E: 1—>-Ciass[E] w u;) E6c " Abs cn ) 
+
+ClassF[ C] = Vu::Type. Inj[C\ (World u) u— >Proj[C] (World u) u —> 
+
+{ Classes (World u) u}—>1 —> Classic] (World u) u 
+
+
+Fig. 10. Macros for dictionary, constructor, and class types. 
+
+
+This method can check its own class against the target class by injecting self and 
+applying the function argument. If the result is none, then it tries again by injecting 
+as the super class, and so on up the hierarchy. 
+
+With this solution, we must be careful to preserve separate compilation—the 
+universal type u includes a variant for every class in the program. Fortunately, 
+in a particular class declaration we need only inject objects of that class. Class 
+declarations can treat u as an abstract type and take the injection function as an 
+argument. Then only the linker needs to know the concrete u type. 
+
+4.5 Class translation 
+
+We now explore the formal translation of class declarations and construction of 
+their method dictionaries. In figure 10 we define several macros for describing 
+dictionary and class types. Figure 11 gives translations for each component of the 
+class declaration. 
+
+Each class is separately compiled to code that resembles an SML functor —a 
+set of definitions parameterized by both types and terms. Linking—the process 
+of instantiating the separate functors and combining them into single coherent 
+program—will be addressed in the next section. Our compilation model is the 
+subject of section 4.7. 
+
+CDEC[C] produces the functor corresponding to class C; see the definition in the 
+top left of figure 11. The code has one type parameter: u, the universal type 
+used for dynamic casts. Following it are two function parameters for injecting and 
+projecting objects of class C. The next parameter is classes, a record containing 
+definitions for other classes that are mutually recursive with C (for convenience, we 
+assume that each class refers to all the others). The final parameter is of unit type; 
+it simply delays references to classes so that linking terminates. 
+
+In the functor body, we define diet (using the macro DICt) and vtab (the trivial 
+instantiation of diet), diet is placed in the class record (so subclasses can inherit 
+its methods); vtab is passed to the NEW macro which creates the constructor code. 
+The constructor is exported so that other classes can create C objects; and, finally, 
+the projection function proj (a functor parameter) is exported so other classes can 
+dynamically cast to C. 
+
+The dictionary for class Obj is hard-coded as DiCT[0bj; ...]. Its dyncast method 
+injects self at class Obj, passes this to the proj argument and returns the result. If 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+17 
+
+
+Class declaration translation: 
+
+CDEC[C] = Au::Type. Ainj: Inj [C] ( World u) u. Aproj: Proj[ C] (World u) u. 
+
+Aclasses : { Classes (World u) u}. A_: 1. 
+
+let diet: \/ta\\ ::ktail[C]. Dict[ C] ( World u) u (SelfTy[ C] ( World u) u tail) , v 
+= DICT[C; u; inj; classes] ' ’ 
+
+in let vtab = diet [Empty[ C]] 
+
+in {diet = diet, proj = proj, new = new[C; u; vtab]} 
+
+Dictionary construction: 
+
+DICT [Obj; u; inj; classes] = Atail::/ctai/[Obj]. 
+
+{dyncast = Aself: SelfTy[ C] ( World u) u tail. Ao::Type. Aproj: u—►maybe a. (24) 
+
+proj (inj PACK[0bj ; u; tail; self])} 
+
+
+CT( C) = class C < B { ... } dom(methvec(C)) = [l\ ... l n ] 
+DICT[C; u; inj; classes] = Ata\\::ktail[C]. 
+
+let super: Dict[ B] (World u) u (SelfTy[ C] (World u) u tail) 
+
+=: (classes.B {}).dict [i?ow;s[C,B] (World u) u tail] 
+in {l\ =: meth[C; h ; u; tail; inj; classes; super],... , 
+l n = meth[C; l n ; u; tail; inj; classes; super]} 
+
+Constructor code: 
+
+fields( C) = Di f i ... D n f n 
+
+new[C; u; vtab] = Afi : (World u)*Di. . .. Af n : (World u)-D n . 
+
+let x = fold {vtab = vtab, f i = f i,... ,f n = f n } 
+as SelfTy[ C] (World u) u Empty [ C] 
+in pack[C; u; Empty [ C]; re] 
+
+Method code: 
+
+METH[C; dyncast; u; tail; inj; classes; super] = 
+
+Aself: SelfTy[ C] (World u) u tail. Ao:::Type. Aproj: u—►maybe a. 
+case proj (inj pack[C; u; tail; self]) 
+
+of some x => some [a] x else super.dyncast self [a] proj 
+
+
+(25) 
+
+
+(26) 
+
+
+(27) 
+
+
+CT(C) = class C < B { ... K Mi .. . M„> 
+m not defined in Mi ... M„ 
+meth[C; m; u; tail; inj; classes; super] = super.m 
+
+
+(28) 
+
+
+CT(C) = class C <1 B { . . . K Mi . . . M n } 3j : Kj = A m(Ai xi . . . A m x m ) { f e;} 
+r = xi :Ai,..., x m :A m , this:C TheSD D<:A Exp[r ; u; classes; e] = e 
+
+meth[C; m; u; tail; inj; classes; super] = 
+
+Aself: SelfTy[C] ( World u) u tail. Axi : ( World u)-Ai. . .. Ax m : ( World u)-A m . 
+let this : ( World u)-C = pack[C; u; tail; self] 
+
+in UPCASTfD: A; u; e] 
+
+
+Fig. 11. Translation of class declarations. 
+
+
+the class tags clo not match, dyncast indicates failure by returning none; there is 
+no super class to test. For all other classes, dict fetches the super class dictionary 
+from classes and instantiates it as super. It then uses METH to construct code for 
+each method label in methvec. 
+
+METH supports three cases: it (1) produces the dyncast method (which must 
+be overridden in every class), (2) inherits a method from the super class, or (3) 
+constructs a new method body by translating FJ code. 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+18 
+
+
+Christopher League et al. 
+
+
+Tagged =Au::Type. [(C : (World u)-C) C6c "] 
+u = ^tu::Type. Tagged u 
+
+PROG[e] = let Xcn = LINK {(C = CDEC[C]) C£c ’ 1 } in exp[o; u; Xcn', e] 
+
+LINK = At : {(C : C7assF[C]) C£c "}. 
+
+fix [Classes (World u ) u] 
+
+(Aclasses : {Classes (World u) «}. {(C = t.C [m] inj c proj c classes) C€cn }) 
+
+where 
+
+inj c = Xx : (World u) C. fold inj l ?' a9s,e<i “ x as u 
+proj c = A x : u. case unfold xof C y => some [(World «)-C] y 
+else none [(World m)-C] 
+
+Fig. 12. Program translation and linking. 
+
+
+4.6 Linking 
+
+Finally, we must instantiate and link the separate class modules together into a 
+single program. Figure 12 gives the translation for a complete FJ program. The 
+link function creates a record of classes from a record of the class functors. The 
+result is bound to x cn and used as the classes parameter in translating the main 
+program expression e. 
+
+link uses fix to create a fixpoint of the record of classes. Each class functor in x 
+has one type parameter and three value parameters. Tagged was defined in figure 10 
+as a parameterized sum type with a variant for the object type of each class in the 
+class table. We instantiate each x.C with the fixed point of Tagged. Next we pass 
+the injection and projection functions, inj c and proj c . The final argument to x.C is 
+the classes record itself. 
+
+4.7 Separate compilation 
+
+Our translation supports separate compilation, but the formal presentation does 
+not make this clear. In this section, we describe our compilation model and justify 
+that claim. 
+
+What must be known to compile a Java class C to native code? At a minimum, we 
+must know the fields and methods of all super classes, to ensure that the layout of C’s 
+vtable and objects are consistent. Next, it is helpful to know enough about classes 
+referenced by C so that the offsets of their fields and methods can be embedded 
+in the code. These principles do not mean that all referenced classes must be 
+compiled together. Indeed, as long as the above information is known, classes can 
+be compiled separately, in any order. 
+
+In our translation, we need not just offsets but the full type information for super 
+classes and referenced classes. If C refers to field x from class D, we need to know all 
+about the type of x (E, for example) as well. This clearly involves extracting type 
+information from more classes, although not necessarily every class in the program. 
+Even so, each class can still be compiled separately, in any order, assuming the 
+requisite types are available. 
+
+A reasonable compilation strategy starts with some root set of classes and builds 
+a dependence graph. For a given program, the root set contains just the class 
+with the main method; for a library, it includes all exported classes. Next, traverse 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+19 
+
+
+the graph bottom-up. Comple each class separately, but propagate the necessary 
+information from C to all those classes that depend on it. Of course, there may 
+be cyclic dependencies, represented by strongly-connected components (clusters) in 
+the graph. In these cases, we extract type information from all members of the 
+cluster before compiling any of them. Still, each class in the cluster is compiled 
+separately. 
+
+A hallmark of whole-program compilation is that library code must be compiled 
+along with application code. This is clearly not necessary in our model. Library 
+classes would never depend on application classes, so they can be compiled in 
+advance. The reason that our formal translation uses the macro World (containing 
+object types for every class in the program) is that, in the most general case, 
+every class in an FJ program refers to every other class. Thus, our translation 
+assumes that the entire program falls within one strongly-connected cluster. In 
+practice, World would include just the classes in the same cluster as the class being 
+compiled. 
+
+5. EXTENSIONS 
+
+Our translation extends to support many features of Java which are excluded from 
+FJ. Null references are encoded by lifting all external object types to sum types 
+with a null alternate (just like the maybe type). Then, all object operations must 
+verify that the object pointer is not null. Our target calculus, unlike JVML, can 
+express that an object is non-null, so null pointer checks can be safely hoisted. 
+
+Static members, interface fields, and multiple parameterized constructors can be 
+added to the class record, along with the dictionary and tag. Mutable fields are 
+easily modeled using mutable records. As required by the JVM, the new function 
+allocates the object record with a default ‘zero’ value for each field. Then any public 
+constructor can be invoked to assign new values to the fields. Super invocations 
+select the method statically from the super class dictionary (as is currently used in 
+dyncast). Java exceptions work similarly to those of SML. 
+
+Private methods are defined along with the other methods. Since they can neither 
+be called from subclasses nor overridden, we simply omit them from the vtable 
+and dictionary. Protected and package scopes are difficult, however, because they 
+transcend compilation unit boundaries. In Moby, Fisher and Reppy [1999] use two 
+distinct views of classes, a class view and an object view. These correspond roughly 
+to the diet and new fields of our class encoding. If we export a class outside its 
+definitional package, all protected methods and fields should be hidden from the 
+object view but not the class view while those of package scope should be hidden 
+from both. 
+
+Private fields 
+
+Private fields can be hidden from outsiders using existential types [League et al. 
+1999]. For convenience, assume that the private fields of each class in the hier¬ 
+archy are collected into separate records. Suppose that Point has private fields 
+x and y, and public field z; and ScaledPoint has private field s. The layout for 
+a ScaledPoint object would be {vtab, Pt:{x, y}, z, SPt:{s}}. With the pri¬ 
+vate fields separated like this, it is easy to hide their types separately. (Using a 
+flat representation is possible, but this separation allows a simpler, more orthog- 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+20 
+
+
+Christopher League et al. 
+
+
+onal presentation.) We embed each class functor in an existential package, where 
+the witness type includes the types of the private fields of that class. From in¬ 
+side class ScaledPoint, we open the Point package, binding a type variable a 
+to represent the private fields of Point. Then, our local view of the object is 
+{vtab, Pt : a, z, SPt: {s}}. Using dot notation [Cardelli and Leroy 1990] for exis¬ 
+tential types makes this encoding more convenient, but is not required. 
+
+Unfortunately, privacy interacts with mutual recursion. Suppose that A has a 
+private field b of class B and that B has a method geta that returns an object of class 
+A. From within class A, accessing this.b is allowed, as is invoking this.b.getaO. 
+It is more difficult to design an encoding that also allows this .b.getaO .b. Using 
+the existential interpretation of privacy described above, each class has its own 
+view of the types of all other objects. From within class A, private fields of other 
+objects of class A are visible. Private fields of objects of other classes are hidden, 
+represented by type variables. In our example, this . b would have a type something 
+like “B with private fields (3” where /? is the abstract type. Likewise, from within 
+class B, the type of method geta might be self—>(“A with private fields a”). The 
+challenge is to allow class A to see that the a in the type of geta is actually the 
+known type of its own private fields. 
+
+Propagating this information is especially tricky given the limitations of the iso¬ 
+recursive types used in our target calculus. We have developed a solution which does 
+not require extending the language. Briefly, we need to parameterize everything 
+(including the hidden type itself) by the types of objects of other classes. Then, 
+each class can instantiate the types of the rest of the world using concrete types 
+for its own private fields (wherever they may lurk in other classes) and abstract 
+types for the rest. The issues are subtle and a formal treatment is outside the 
+scope of this article. We are considering extending FJ itself with privacy in order 
+to elucidate the technique. 
+
+Interfaces 
+
+Given an object of interface type, we know nothing about the shape of its vtable. 
+There are various ways of locating methods in interface objects. Proebsting et al. 
+[1997] construct a per-class dictionary that maps method names to offsets in the 
+vtable. Krall and Grafl [1997] construct a separate method table (called an itable ) 
+for each declared interface, storing them all somewhere in the vtable. Although 
+they are not clear on how to use the itable, there appear to be two choices. First, 
+we can search for the appropriate itable in the vtable, which amounts to lookup of 
+interface names rather than method names. Second, when casting an object from 
+class type to interface type, we can select the itable and then pair it with the object 
+itself. This avoids name lookup entirely but requires minor coercions when casting 
+to and between interface types. 
+
+Our translation can be extended to support both strategies. For the first strategy, 
+all we need is to introduce unordered records into our target language (see [League 
+et al. 1999]), with a primitive for dictionary lookup. All the itables for a class would 
+be collected into a separate unordered record, itself an element of the still ordered 
+vtable. Then, casting an object to an interface type only requires repackaging (a 
+runtime no-op) to hide those entries not exported by the current interface. 
+
+We can also follow the latter strategy, representing interface objects as a pair 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+21 
+
+
+where the type of the underlying object is concealed by an existential type. For 
+example, an object which implements the Runnable interface includes a method 
+runQ which can be invoked to start a new thread. In our target language, a 
+Runnable object is represented as 3a::Type. {itab : {run : a —r 1}, obj : a}. To invoke 
+the method, we open the existential, select the method from the itab, select the obj, 
+and apply. With this representation, interface method invocations are about the 
+same cost as normal method invocations, although upward casts to interface types 
+are no longer free. 
+
+6. RELATED WORK 
+
+Fisher and Mitchell [1998] use extensible objects to model Java-like class constructs. 
+Our encoding does not rely on extensible objects as primitives, but it may be viewed 
+as an implementation of some of their properties in terms of simpler constructs. 
+Rerny and Vouillon [1997] use row polymorphism in Objective ML for both class 
+types and type inference on unordered records. Our calculus is explicitly typed, 
+but we use ordered rows to represent the open type of self. 
+
+Our object representation is superficially similar to several of the classic encodings 
+in Fjj-based languages [Bruce et al. 1999; Pierce and Turner 1994]. As in the Abadi, 
+Cardelli, and Viswanathan encoding [1996], method invocation uses self-application; 
+however, we hide the actual class of the receiver using existential quantification over 
+row variables instead of splitting the object into a known interface and a hidden 
+implementation. This allows reuse of methods in subclasses without any overhead. 
+We use an analog of the recursive-existential encoding due to Bruce [1994] to give 
+types to other arguments or results belonging to the same class or a subclass, as 
+needed in Java, without over-restricting the type to be the same as the receiver’s. 
+
+Several other researchers have described type-preserving compilation of object- 
+oriented languages. Wright et al. [1998] compile a Java subset to a typed interme¬ 
+diate language, but they use unordered records and resort to dynamic type checks 
+because their system is too weak to type self application. Crary [1999] encodes 
+the object calculus of Abadi and Cardelli [1996] using existential and intersection 
+types in a calculus of coercions. Glew [2000a] translates a simple class-based object 
+calculus into an intermediate language with F-bounded polymorphism [Canning 
+et al. 1989; Eifrig et al. 1995] and a special ‘self’ quantifier. 
+
+Comparing object encodings 
+
+A more detailed comparison with the work of Glew and Crary is worthwhile. The 
+three encodings share many similarities, and appear to be different ways of express¬ 
+ing the same underlying idea. As Glew remarks, “both Crary and League et alls 
+ideas can be seen as encodings of the self quantifier introduced in this paper” [Glew 
+2000a, page 9]. He did not present a detailed comparison, but the statement is 
+indeed true. 
+
+In this section, we will attempt to clarify the connections between these en¬ 
+codings. Following Bruce et al. [1999], we can specify object interfaces as type 
+operators, so that the type of the self argument can be plugged in. The Point 
+interface, for example, would be represented as Ip = Aa::Type. {getx: a — dnt}. 
+
+Glew used a twist on F-bounded polymorphism to encode method tables that 
+could be reused in subclasses. This leads naturally to an object encoding using 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+22 
+
+
+Christopher League et al. 
+
+
+an F-bounded existential ( FBE ): 3a < 1(a).a, which Glew writes as self a.1(a). 
+Typically, the witness type is recursive; it is a subtype of its unrolling. 
+
+The connection between self and the F-bounded existential was recognized in¬ 
+dependently by Glew and ourselves. 1 We can derive the rules governing self from 
+those for F-bounded existentials. Glew uses equi-recursive types in [2000a]; a re¬ 
+striction to iso-recursive types is possible, though awkward [Glew 2000b]. The rules 
+for packing and opening self types must simultaneously fold and unfold in precisely 
+the right places. 
+
+Self application is typable in FBE because the object, via subsumption, enjoys 
+two types: the abstract type a and the interface type 1(a). Crary [1999] encodes 
+precisely the same property as an intersection type: 3a. a A 1(a). Again, the 
+witness type is recursive. With equi-recursive types, a value of type fil also has 
+type I (n /); it could be packaged as a A 1(a). Crary makes this encoding practical 
+using a calculus of coercions —explicit retyping annotations. Coercions can drop 
+fields from the end of a record, fold and unfold recursive types, mediate intersection 
+types, and instantiate quantified types. All coercions are erasable. 
+
+We will now show how our own encoding, based on row polymorphism, relates 
+to these. A known technique for eliminating an F-bound is to replace it with a 
+higher-order bound and a recursive type. That is, we could represent 3a < I (a).a 
+as 3(5 < Using a point-wise subtyping rule, the interface type operators 
+
+themselves enjoy a subtyping relationship. Iso-recursive types can be used directly 
+with this technique because the fixpoint is separate from the existential. 
+
+Next, though it is less efficient, we can implement the higher-order subtyping 
+with a coercion function: 
+
+35 :: Type=»Type.{c : S (/z (5) —> I (/z<5), o: fii 5} 
+
+To select a method from an object, we first open the package, select the coercion 
+c, and apply it to the unfolding of o. This yields an interface whose methods are 
+then directly applicable to o. 
+
+Using a general function for this coercion yields more flexibility than we require 
+to implement Java. All the function ever needs to do is drop fields from records. 
+With row polymorphism, we can express the result of pre-applying the coercions at 
+all levels. The encodings of Crary and Glew work by supplying two distinct views 
+of the object: an abstract subtype of a concrete interface type. With row poly¬ 
+morphism, that distinction is unnecessary; we can hide just the unknown portion 
+of the interface directly. 
+
+All three of these encodings are operationally efficient. The primary differences 
+between them are in the complexity required of the target calculus. In scaling them 
+to realistic compilers and source languages, other differences may emerge. 
+
+7. CONCLUSION 
+
+We have developed an efficient encoding of key Java constructs in a simple, im- 
+plementable typed intermediate language. The encoding, after type erasure, has 
+the same operational behavior as a standard implementation of self-application. 
+Our strategy extends naturally to a significant subset of Java. We support mutual 
+
+1 Personal communication, August 2000 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+23 
+
+
+recursion and dynamic cast while retaining separate compilation. The formal trans¬ 
+lation using Featherweight Java allows comprehensible type-preservation proofs and 
+serves as a starting point for extending the translation to new features. 
+
+This translation is being implemented as a new front-end to the SML/NJ com¬ 
+piler. It loads Java class files, translates them to FLINT, and then into native 
+code. We can currently compile toy Java programs; the intermediate code success¬ 
+fully type-checks after every phase. Preliminary measurements of both compilation 
+and run times are promising, but some work remains before we can run real bench¬ 
+marks. 
+
+
+APPENDIX 
+
+A. FEATHERWEIGHT JAVA SEMANTICS 
+
+These rules are reprinted from [Igarashi et al. 1999], with a few adaptations. 
+
+Field lookup 
+
+fields ( Obj) = • (30) 
+
+CT(C) = class C < B {Ci f i; ... C n f„ ; K ... } 
+
+fields (B) = Bj g 1 ...B m g m _ 
+
+fields^ C) = Bi g! .. ,B m g m ,Ci fi ...C„ f„ 
+
+Method lookup 
+
+
+CT(C) = class C <1 B { ... K Mi ... M n > 
+3j : Kj = D m(Di x x ... D m x m ) { { e;> 
+mtype( m, C) = Di... D m ->D 
+mbody( m, C) = (xi... x m , e) 
+
+CT(C) = class C < B { ... K Mi ... M„} 
+m not defined in Mi... M„ 
+
+mtype( m, C) = mtype{ m, B) 
+mbody( m, C) = mbody( m, B) 
+
+
+Valid method overriding 
+
+
+mtype( m, B) = Ci... C„->C 0 
+override^ m, B, Ci... C„->C 0 ) 
+
+
+(32) 
+
+
+(33) 
+
+
+(34) 
+
+
+]2T such that mtype( m, B) = T 
+override^ m, B, Ci... C n ->Co) 
+
+
+(35) 
+
+
+Computation 
+
+
+
+fields (C) = Di fi .. ,D„ f „ 
+
+(new C(ei ... e„)). f, —> e* 
+
+
+(R-Field) 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+24 
+
+
+Christopher League et al. 
+
+
+mbody(m, C) = (xi ... x„, e 0 ) 
+
+(new C(ei .. . e m )) .m(di ... d n ) —> 
+
+[di/xi,..., d n /x„, new C(ei ... e m )/this] e 0 
+
+(R-Invk) 
+
+CCD 
+
+(D)new C(ei...e n ) —> new C(ei...e„) 
+
+(R-Cast) 
+
+Subtyping 
+
+CCD 
+
+C <: C 
+
+(36) 
+
+CT(C) = class C <3 B { ... } B <: A 
+
+CCA 
+
+(37) 
+
+Class typing 
+
+
+K = C(Bi g| ■ • ■ B n g n , Cl f i . . . C m f rn ) 
+
+{super( gl .. .g n ); 
+this.fi = f!; ...this.f m = f m ;> 
+ftelds{B) = Bi gj . . ,B„ g n 
+
+Mj ok in C Vi G {1... kj 
+
+class C < B {Ci f i; ... C m f m ; K Mi ... M^} ok 
+
+(38) 
+
+Method typing 
+
+
+Xi : Di,... ,x n : D„, this :Che€E E<:D 
+
+CT( C) = class C < B { . .. } 
+
+D m(Di xi .. . D„ x„ ) { j e;} ok in C 
+
+(39) 
+
+Expression typing 
+
+T h e G C 
+
+r h x e r(x) 
+
+(T-Var) 
+
+r h e S C fields( C) = Di f i... D„ f n 
+
+r he.fi G Di 
+
+(T-Field) 
+
+r h e G C mtype{ m, C) = Dj,.-.. D„->D 
+
+r h e, G C, CiCDi (Vi G {1 .. . n}) 
+rhe.i(ei„.e„) G D 
+
+(T-Invk) 
+
+fields( C) = Di f i ... D„ f n 
+r h ei G C, CiCDi (Vi G {1... nj) 
+r h new C(ei ... e„) G C 
+
+(T-New) 
+
+rheGD DCC 
+
+r h (C)e G C 
+
+(T-UCast) 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+25 
+
+
+T b e £ D CCD CyfD 
+T b (C)e £ C 
+
+
+(T-DCast) 
+
+
+rh e £ D C V: D D V: C 
+
+(T-SCast) 
+
+r h (C)e £ c 
+
+B. TARGET LANGUAGE SEMANTICS 
+
+B.l Static judgments 
+
+$ maps type variables to their kinds and A maps term variables to their types. 
+
+Kind formation 
+
+b k kind 
+
+b Type kind 
+
+(40) 
+
+b R l kind 
+
+(41) 
+
+
+b k kind b n' kind 
+
+b kind 
+
+
+(42) 
+
+
+li — lj ^ 7 j (Vf, J £ { 1 . . . 77-} ) 
+b Ki kind (V* £ {1... ?z}) 
+
+b {^i :: Ki ... l n :: K n } kind 
+
+Kind environment formation 
+
+b o kind env 
+
+
+(43) 
+
+
+b 4> kind env 
+(44) 
+
+
+b $ kind env b n kind 
+b <f>, a :: k kind env 
+
+
+Type formation 
+
+b $ kind env a £ dom(4>) 
+$ b a :: 4>(a) 
+
+4>, a :: k b r :: n' 
+
+$ b Xav.K. t :: k=>k' 
+
+
+(45) 
+
+
+<J> b t :: k 
+
+
+(46) 
+
+(47) 
+
+
+'!> b T\ :: k'=>k < E > b r 2 :: k' 
+
+$ h Tj 72 :: k 
+
+li — lj =£• i — j (Vi, J £ {1 . ■ . 77-}) 
+
+4> b Tj :: Kj (Vi £ {1... n}) 
+
+$ h {h = n ... i„ = T„} :: {h ::ki ...l n :: k„} 
+
+4> I- t :: {Zi :: Ki • ■ • l n :: K n } 
+
+4> h T-li :: Ki 
+
+
+(48) 
+
+
+(49) 
+
+(50) 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+
+
+26 
+
+
+Christopher League et al. 
+
+
+$ h Ti :: Type $ b r 2 :: Type 
+4> b T\ — >t -2 :: Type 
+
+
+$,a::«|-T :: K 
+
+
+4) b nav.K. t 
+
+:: k 
+
+$,a::/vhr :: 
+
+Type 
+
+4> b X/a::n. t :: 
+
+Type 
+
+4>, a :: k b r :: 
+
+Type 
+
+4> b 3a::n. t :: 
+
+Type 
+
+
+Type equivalence 
+
+$ h ri :: Ki 4>, a :: b t 2 :: k 2 
+
+$ b (Aa::/ti. r 2 ) n = r 2 [a := n] :: k 2 
+
+$hr :: «=>«/ a ^ dom( 4 >) 
+
+$ b Xa::K. t a = t :: k=>k' 
+
+
+(51) 
+
+(52) 
+
+(53) 
+
+(54) 
+
+$ h r = r' :: k 
+
+(55) 
+
+(56) 
+
+
+li (7 ^ i — j (Wi,j G {1 ... tr }) 
+
+4> b r* :: Kj (ViG{l...n}) 
+
+$ h {Zi = ri .. ,l n = T n }-h = Ti :: Ki 
+
+li lj ^ i = j ( Vi, j G {1 ... tij-) 
+
+4> b t :: {h :: Ki ... l n :: K n } 
+
+$ b {h = T-h ...l n = r-l n } — tv. {h ::k-l ...l n :: K n } 
+
+
+(57) 
+
+
+(58) 
+
+
+4 > b r :: k 
+4> b t = t :: K 
+
+
+(59) 
+
+
+4> b Ti = r 2 :: k 
+
+4> b r 2 = Ti :: k 
+
+(60) 
+
+4> b n = t 2 :: k 4> b t 2 = 73 :: K 
+
+4> b Ti = T 3 :: K, 
+
+(61) 
+
+4>, a :: n b t\ = t 2 :: k! 
+
+4> b Xav.K.Ti = Aa::n. r 2 :: k=>k' 
+
+(62) 
+
+4> b n = r( :: /V=>k 4> b t 2 = t 2 :: /V 
+
+4> b ri r 2 = r( r 2 :: k 
+
+(63) 
+
+li — lj ^ i — j (Vi, j G {1 ... tij-) 
+
+4> b Ti = r- :: At.; (Vi G {1... n}) 
+
+$ h {Zi = Ti . . . l n = T n } = {h = t[ . . . l n = <} 
+
+• • {/1 x hi 1 ... l n y. Av n } 
+
+(64) 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+27 
+
+
+*f> h r = t' :: {h :: m k„} 
+
+
+$ h ti = t[ :: Type <3> h r 2 = r 2 :: Type 
+$ h n—>- t 2 = r{—*-r 2 :: Type 
+
+$ f- Tl = T [ :: Type $hr 2 = r':: R iu{1> 
+$h/:r 1 ;r 2 = ;:r{;r' :: R L - {i} 
+
+$ h r = r' :: R 0 
+
+<3> h {r} = {r'} :: Type 
+
+$ h r = t' :: R® 
+
+$ h [r] = [r'] :: Type 
+
+$,a::shTi = T2 :: k 
+$ h pawn. t\ = fior.'.K. r 2 :: k 
+
+$, a:: n h ti = r 2 :: Type 
+<J> h Va::tc. ri = Va::tc. r 2 :: Type 
+
+$, a:: k h Ti = r 2 :: Type 
+<J> h 3a::tc. ti = 3a::rc. r 2 :: Type 
+
+
+Type environment formation 
+
+
+A type env 
+
+
+<J> h o type env 
+
+A type env $hr :: Type 
+$ h A, x : t type env 
+
+
+Term formation 
+
+
+$;Ahe:r 
+
+
+A type env x £ dom(A) 
+
+$;Aht:A(t) (75) 
+
+$;Ahe:r <J> h r = t' :: Type 
+
+-3^77?-— (76) 
+
+A, x: r I- e: t' 
+
+$; A h (Ax: r. e): r—*r' 
+
+<J>; A h ei: r '—*t $;Ahe 2 :r' 
+
+—------ 78 
+
+$; A h ei e 2 : t 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+
+28 
+
+
+Christopher League et al. 
+
+
+li — lj ^ i — j (fli^j C {1 . .. ftj-) 
+
+$; A h e.j: Tj (Vi S {1... n}) 
+
+<E>; A h {ii = ei.. ,l n = e„} : {h : n ... l n : r„} 
+
+
+$; A h e: {l\ : t\ ; ... l n : r„ ; r} 
+$; A h e.ij :r t 
+
+
+( 80 ) 
+
+
+a:: k; A h e: r 
+$;Ah (Aa::K. e): \/a::n. r 
+
+$;Ahe: Va::tc. r $hr' :: k 
+$;A he [t'] : r[a := t'\ 
+
+$hr :: Type 
+$;A h abort [r] : r 
+
+
+(81) 
+
+(82) 
+
+(83) 
+
+
+B.2 Properties of static judgments 
+
+Lemma 1 (Normalization). Type reductions are strongly normalizing. 
+
+PROOF SKETCH. The type equivalence judgments can be read left-to-right as 
+reductions. To demonstrate that these reductions are strongly normalizing, we 
+view the type language as a simply-typed A-calculus itself, extended with records 
+(tuples), lists with labeled elements (rows), a base type (Type) and several constants 
+(—>, { • }, [■]). The binding operators (p, V, 3) are also constants, since they are 
+neither introduced nor eliminated by any reduction rule. 
+
+Standard proofs for strong normalization of the simply-typed A-calculus (see, for 
+example, [Goguen 1995]) can be adapted to this type language. □ 
+
+Lemma 2 (Confluence). Type reductions are confluent. 
+
+PROOF sketch. As above, we can adapt a standard proof for confluence of the 
+simply-typed A-calculus. □ 
+
+Theorem 2 (Decidability). All static judgments in the previous section are 
+decidable. 
+
+
+PROOF. Judgments for the formation of kinds, kind environments, types, and 
+type environments are all syntax-directed and trivially decidable. 
+
+Type equivalence is not syntax-directed. Since reductions are, however, strongly 
+normalizing (lemma 1) we have an algorithm for deciding type equivalence: re¬ 
+duce ri and t 2 to normal form, then test whether they are syntactically congruent 
+(modulo renaming of bound variables). 
+
+Term formation is syntax-directed except for rule (76), which accounts for type 
+equivalences. If an algorithm always reduces types to normal forms, then the types 
+of two different expressions can be checked for syntactic congruence, and rule (76) 
+can be omitted. □ 
+
+
+B.3 Operational semantics 
+
+Values v ::= A x:r.e \ {( l — v )*} | fix [r] e | inj[ v | Aq::k. e 
+| (a::n = t, v.t') \ fold v as pawn, r at A'yr.n. s[y] 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+29 
+
+
+Primitive reductions 
+
+
+(Ax : r. 
+
+e) u 
+
+
+e[x := i>] 
+
+({h—Vi ■ 
+
+• • In 
+
+— ^ 
+
+v n })-h ^ Vi 
+
+(fix [r] e). 
+
+i ^ 
+
+(e 
+
+(fix [r] e)).Z 
+
+
+k = 
+
+
+
+case mjj 
+
+;ri ; . 
+
+
+:T " ;r] v of 
+
+(I., Xj =>• e 
+
+=i) je 
+
+{!■■ 
+
+■ m } else e' 
+
+^ Zk[Xk ■= 
+
+«] 
+
+
+7^ l'k 
+
+(Vfc 
+
+e 
+
+{1 ... to}) 
+
+• -[/I 
+
+case mjJ 
+
+;ri ; . 
+
+,.J„ 
+
+;r " ;r] v of 
+
+
+(lj Xj => else e' 
+
+
+unfold (fold v as r at r s ) as t at r s m v 
+
+
+e e' 
+
+(84) 
+
+(85) 
+
+( 86 ) 
+
+(87) 
+
+( 88 ) 
+
+(89) 
+
+
+(Aa::n. e) [t] e[cr := r] 
+
+
+(90) 
+
+
+open (a::K = t',v:t) as {a::n, x : r) in e' 
+e 7 [a := t’][x := x] 
+
+
+(91) 
+
+
+abort [t] t —> abort [r] 
+
+
+Congruence rules 
+
+
+
+e 
+
+
+e' 
+
+
+
+
+e e 2 
+
+
+e' e 2 
+
+
+
+
+e 
+
+
+e' 
+
+
+
+
+Vi e 
+
+
+e' 
+
+
+
+
+e 
+
+
+e' 
+
+
+
+{Zi = ui.. 
+
+• • h—l — Vi— 1 li — 
+
+e l, 
+
+s+i = 
+
+^2+1 • • • In — 
+
+= Cn } 
+
+^{h~- 
+
+= Vi • . J*_1 = Vi_; 
+
+i h 
+
+= e' 
+
+^2+1 - ^2+1 • 
+
+. . l n • 
+
+
+e 
+
+
+e' 
+
+
+
+
+e.l 
+
+
+e'.Z 
+
+
+
+
+(92) 
+e e' 
+
+(93) 
+
+(94) 
+
+(95) 
+
+(96) 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+
+30 
+
+
+Christopher League et al. 
+
+
+e^e' 
+
+mj[ e w inj[ e' 
+
+
+(97) 
+
+
+e e! 
+
+case e of (Z, a;* => else e" 
+
+c —> case e' of (Z* Xj => e*)* 6 ! 1 ”'” 1 } else e" 
+
+e e' 
+
+fold e as r at r s m fold e! as r at r s 
+
+e e' 
+
+unfold e as t at t s c —► unfold e! as r at r s 
+
+
+(98) 
+
+
+(99) 
+
+( 100 ) 
+
+
+e^e' 
+e [r] w e' [r 
+
+e^e' 
+
+(a::« — T,e:r') *-> (a::n — t, e ': r') 
+
+
+( 101 ) 
+
+( 102 ) 
+
+
+e e' 
+
+- 7 -^- ( 103 ) 
+
+open e as x: r) in ei 
+
+c -» open e' as (a::n, x: r) in ei 
+
+B.4 Soundness 
+
+Lemma 3 (Substitution of terms). //<L; A I- e’-.r' and <F;A,x:t' I- e:r, 
+then $; A h e[x := e']: r. 
+
+PROOF. By induction on the derivation of <f>; A, x : t' h e : r. □ 
+
+Lemma 4 (Substitution of types). If <f> h r' :: k and <&, a::/c;A h e:r, 
+Z/ien $; A [a := r'] h e[a := t'] : t[qi := t']. 
+
+PROOF. By induction on the derivation of <F, a :: k\ A h e: r. □ 
+
+Theorem 3 (Subject reduction). If e e! and <1>;A h e:r Z/ien $;A h 
+e 1 :t. 
+
+PROOF. By induction on the derivation of e ^ e!. 
+
+Case (84). (Ax : r. e) v e[x := u]. From antecedent, $;Ah (Ax : r. e) v: t'. 
+By inversion on (78) and (77), $; A,x:r h e : t', and <f>; A h v:t. Finally, 
+
+$;Ah e[x := u]: t' using lemma 3. 
+
+Case (85). ({Zi = v\... l n = v n }).Zj Uj. From antecedent, 
+
+T; A h {Zi = v\... l n = v„}.li: t. By inversion on (80) and (79), $;Ah Uj: r. 
+
+Case (86). (fix[r] e).Z.; (e (fix [r] e)).Z,. From 
+antecedent, <f>; A h (fix [r] e).Z i:Tj. By inversion on (80), 
+
+<F; A h fix [r] e: {Zi : Ti; ... Z„ : r„ ; r'}. By inversion on (3), 
+
+$;A h e:{r}—>{r}, and r = {Zi: Ti; ... l n : r n ; t'}. Using (78), 
+
+<F; A h e (fix [r] e): {Zi: n ; ... Z„ : r„ ; r'}. Then, using (80), 
+
+$;Ah(e (fix [r] e)).Z:Tj. 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+31 
+
+
+Case (87). case inj v Q f x . =*, e .ye{i...m} e | se e < 
+
+&k[xk '■= f] where h = l' k . From antecedent, $;Ah case ... : t'. By inversion on 
+(9), 4>; A, Xk-Ti h efe : r' and 4>; A h inj;.' v : pi: n ; .. .l n : r„ ; r]. By inversion on 
+(8) and lemma 3, $;Ah ek[xk := u]: r'. 
+
+Case fSS). case injp 1 ' Tl ’' Tr * ,T C of (/}• Xj => ejy^i 1 -™} else e! <—> e' where 
+li yf I}, V7c € {1... to}. From antecedent, $; A h case ... : t'. By inversion on (9), 
+$;Ahe':r'. 
+
+Case (89). unfold (fold v as r at r s ) as r at t s m v. From antecedent, 
+
+$;A h unfold ... :t'. By inversion on (11) and (10), r = fia::n.T o, 
+t' = (t s to)[ a := r], and $;Ahti:(r s r 0 )[o; := r]. 
+
+Case (90). (A a::n.e) [r] t —> e[cr := t\. From antecedent, 
+
+$;A h (Actus;, e) [r] :r'. By inversion on (82) and (81), t' must be in the 
+form of Ti[a := r], and d>,a::tc; A h e:ri, and $ h r :: k. Using lemma 4, 
+
+4>; A h e[a := r] : ri[a := r], i.e. 4>; A h e[a := r]: r'. 
+
+Case (91). open (a::n — t ', v : r) as (a::n, x:t) in e' ^ e'[ct := t'][x := u]. 
+From antecedent, $;A h open ... : tq. By inversion on (2), 
+
+$;A h {a::n — t', v:t) : 3a::n. r, 4>, a:: k; A, x: r h e! : ro, and 
+4) h To :: Type. By inversion on (1), 4>; A h v:r[a := t'\. Using 
+lemma 4, 4>; A,a::r[a := r'] h e'[a := r'] :r 0 [a := r']. Using lemma 3, 
+
+4>; A b e'[a := t'][x := v \: r 0 [a := r']. This is equivalent to r 0 since a is not free in 
+To- 
+
+Case (92). abort [r] abort [r]. Trivial. 
+
+Case (93). e e 2 e' e 2 where e > e!. From antecedent, 4>; A h e e 2 : r. By 
+inversion on (78), 4>; A b e: t '—and 4>; A h e 2 : r'. By induction hypothesis, 
+
+4>; A h e! : t'—*t. Using (78), $;Ahe'e 2 : r. 
+
+The cases for all the remaining congruence rules (94-103) follow the same pattern: 
+invert some typing rule, apply induction hypothesis, then apply the same typing 
+rule. □ 
+
+Lemma 5 (Canonical forms). If v is a value and 4>; A h v.t then v has the 
+canonical form given by the following table. 
+
+
+T 
+
+V 
+
+Tl-+T 2 
+
+\x : Ti. e 
+
+{h-T i; .. J„:r n ;r'} 
+
+Pi — Ti, . . . f n — T n , • • ■ } 
+or fix pi :ti ; r n ; r'] e 
+
+Pi: ti ; ... l n : r n ; r'] 
+
+in j[ ; v 
+
+s[/mx::k. t'\ 
+
+fold v 1 as t' at A r y::K. spy] 
+
+\/a::n. t' 
+
+A a::n. e 
+
+3 a::n. t' 
+
+(a::n — t", v' : r') 
+
+
+PROOF. By inspection, using lemma 2. □ 
+
+Theorem 4 (Progress). If 4>; A h e: r then either e is a value or e ^ e!. 
+PROOF. By induction on the derivation of 4>; A h e: r. 
+
+Case (76). direct application of induction hypothesis. 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+32 
+
+
+Christopher League et al. 
+
+
+Case (77). Xx : r. e is a value. 
+
+Case (0'S,). 4>;A b ei e 2 : r where $;A h e\\r' — *t. By induction hypothesis, 
+there are three cases: (1) e\ and e 2 are both values. Using lemma 5, e\ must have 
+the form A x:r.e. Using (84), (A x:r.e) v e[x := u]. (2) ei is a value and 
+e 2 e^; use (94). (3) e\ <—> e[; use (93). 
+
+Case (79). 4>; A b {C = ei.. ,l n = e n } : {l± : r-| ... l n : r n }. By induction hypoth¬ 
+esis, there are two cases: (1) ei... e„ are all values; then {l\ = e\... l n — e„} is a 
+value. (2) e* e' for some i; use (95). 
+
+Case (80). 4>; A b e.k :r». By induction hypothesis, there are three cases: (1) e 
+is a value, and by lemma 5, it has the form {C = v\... l n — v n }. Then, progress 
+can be made using rule (85). (2) e is a value, and by lemma 5, it has the form 
+fix[r] e; then use rule (86). (3) e e'; use (96). 
+
+Case (3). fix [r] e is a value. 
+
+Case (8). 4>; A b injj) e:r. By induction hypothesis, there are two cases: (1) e 
+is a value; thus injj) e is a value. (2) e e'\ then, use (97). 
+
+Case (9). $;A h case e of ( l( x 7 => e ? ) :,e ^ l “ TO ^ else e !: r'. By induction hy¬ 
+pothesis, there are two cases: (l) e is a value. According to lemma 5, it has the 
+form \n]( v. Thus, either (87) or (88) applies. (2) e e'; use (98). 
+
+Case (10). <f>; A b fold e as r at t s : t s t. By induction hypothesis, there are two 
+cases: (1) e is a value; then fold e as r at t s is a value. (2) e c —> eb then use (99). 
+
+Case (11). 4>; A b unfold e as r at r s : r'. By induction hypothesis, there 
+
+are two cases: (1) e is a value of type t s ( i fiav.K . r). By lemma 5 it has the form 
+fold v as jic\:::K. r at r s —use (89). (2) e e'; then use (100). 
+
+Case (81). A a::n.e is a value. 
+
+Case (82). $;A b e [t'\ : r[a := t '], where 4>;A b e:Va::K.r. By induction 
+hypothesis, there are two cases: (1) e is a value. By lemma 5, it must have the 
+form A a::K.e'; use (90). (2) e e'; use (101). 
+
+Case (1). 4>; A b (a::K = T / , e:r) :3a::n. r. By induction hypothesis, there are 
+two cases: (1) e is a value; then (a::K = r / , e:r) is a value. (2) e eJ: then use 
+(102). 
+
+Case (2). 4>; A b open e as ( av.K , x : r) in e': rb By induction hypothesis, there 
+are two cases: (1) e is a value of type 3 a::n. t. By lemma 5, it has the form 
+(ot::K = r / , e: r); use (91). (2) e e'; use (103). 
+
+Case (83). 4>; A b abort [r] :t. Evaluates to abort [r] using (92). 
+
+
+□ 
+
+C. PROPERTIES OF THE TRANSLATION 
+C.l Contents of field/method vectors 
+
+Lemma 6 (Method vector). mtype( m, C) = Di... D„->Do if and only if 
+(m, Di... D n ->D 0 ) £ methvec(C). 
+
+PROOF. By induction on the derivation of C <: Obj. In the base case, the impli¬ 
+cation holds trivially. Otherwise, let CT(C) = class C < B {.. .K Mj...M„>. We 
+distinguish two cases: 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+33 
+
+
+(1) m is not defined in (=>) Then, mtype{ m, C) = Di... D„->D 0 = 
+
+mtype( m, B). Using the inductive hypothesis, (m, Di... D„->Do) is in methvec{ B) and 
+thus it is also in methvec( C). (*t=) addmeth( B, [Mi ... M„]) could not have added m, 
+so it must be that (m, Di ... D n ->D 0 ) € methvec( B). Using the inductive hypothesis, 
+mtype( m, B) = D x .. .D„->D 0 and, in this case, mtype( m, C) = mtype( m, B). 
+
+(2) 3j such that My = D 0 m(Di xi... D„ x„) { f e;>. In this case, mtype{ m, C) is 
+directly defined as Di ... D n ->D 0 . 
+
+(=>) case mtypeim. B) = C\ ... C n ->Cb- Then, from class well-formedness we con¬ 
+clude that C i = D; for i £ {0.. .n}. From the inductive hypothesis, we find that 
+(m, Ci... C n ->Co) £ methvec(B). Thus, (m, Di ... D„->Dq) £ methvec(C). 
+
+(=>) case fiT such that mtype(m,B) = T. From inductive hypothesis (in the re¬ 
+verse direction), -flT such that (m, T) £ methvec( B). Given this, we can show (by 
+induction on j) that addmeth adds (m, Di.. .D n ->Do) to methvec{ C). 
+
+(*f=) case ( m , C\... C n ->Co) £ methvec(B). Therefore, by definition, (m, Ci... C„->Co) 
+£ methvec(C). From class well-formedness, we argue that Cj = D, for i £ {0... n}. 
+(4=) case fiT such that ( m,T ) £ methvec(B). Then, addmeth and mtype( m, C) both 
+assign m the signature Di... D n ->D 0 . 
+
+□ 
+
+
+Lemma 7 (Field vector). If D f £fields(C), then (f,D) £ fieldvec( C). 
+
+PROOF. By induction on the derivation of C <: Ob j. □ 
+
+C.2 Object layout 
+
+Lemma 8 (Well-kinded rows). If C <: A, then 
+<F b f?ows[C,A] :: kcn=>Type^ktail[C]^ktail[A]. 
+
+PROOF. By induction on the derivation of C <:A. Observe that b ken kind 
+and, for any D £ cn, h ktail[D\ kind. Then, the base case (C = A) holds trivially. 
+Now, let CT(C) = class C < B {Di f i; ...D„ f„; K...} and B <: A. Using 
+the inductive hypothesis, Rows[ B, A] has kind fccn=^ Type=^> ktail[ B]=> ktail[ A] in 
+kind environment $. The rule (21) constructs a tuple taiT = {m= ..., f= ...}. 
+Let <f>' = <I>, w::fccn, u::Type, tail:: ktail[C]. It remains to be shown that tail' 
+has kind ktail[ B] in kind environment < f>'. Consider the f component; the argu¬ 
+ment for m is similar. Using the definition of ktail[ C] and the tuple selection rule 
+(50), <!>' b tail-f :: R dom (J 5eWuec ( c ))_ Using the definition of ken and class table well- 
+formedness, 'P b w-D n :: Type. Finally, the row formation rule (5) assigns kind 
+pdomt/ieMwcfc))—{f„} row . w .p n ; tail-f). Iterate for each label; the result¬ 
+
+ing row has kind Rdom(/«e;dvec(C)U{C,f 1 .,.f n } which ig the same as R dom(fieldvec(B)) 
+
+□ 
+
+Lemma 9 (Tail position). If C <: B. <F b w :: ken, $ b tail :: ktail[ C], and 
+<I> b self :: Type, then (f?oms[C,B] w u tail)-m self has the form (. .. ;tail-m self) and 
+(Rows[ C, B] w u tail)-f has the form (. .. ; tail-f). 
+
+PROOF. By inspection. □ 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+34 
+
+
+Christopher League et al. 
+
+
+Lemma 10 (Method layout). If <f> b w :: ken, b tail :: ktail[ C], 
+
+<I> b self :: Type, and (m, T) € methvec( C), then 
+
+(Rows[ C, Obj] w u tail)-m self = (... ; m: self—► Tj/[self; w; T]; ... ; tail-m self). 
+
+PROOF. By induction on derivation of C <: Obj. methvec(0bj) is empty, so the 
+base case holds trivially. Otherwise, let CT( C) = class C <a B {...}. 
+
+Case ( m,T ) G methvec(B). Let tail' = {m = Aself::Type. ..., f= ...}, as given in 
+rule (21); according to lemma 8, this has kind ktail[ B], Invoking the inductive 
+hypothesis (with tail') we find that 
+
+(Roms[B, Obj] w u tail^-m self 
+= (...; m: self—Tj/[self; w; T ]; ... ; tail-m self) 
+
+Then, expanding the definition we get 
+
+(Roms[C, Obj] w u tail)-m self 
+= (... ; m: self—^Tt/[self; w; T ];.; tail-m self) 
+
+Case (m, T) methvec(B). Then, m must be one of the names mi.. . m n enumer¬ 
+ated in the definition. In this case, the row taiOm self will contain an element m 
+of type self— >Ty [self; w; T]. This tail' is passed to Rows[B, Obj], but according to 
+lemma 9, it will still appear in the result. 
+
+□ 
+
+Lemma 11 (Field layout). If C <: Obj, <T> I— w :: ken, $ I- tail :: ktail[ C], 
+and fieldvec(C) = fieldvec(0bj) -H- [(Zi, Di)... (l n , D n )], then 
+Rows[ C, Obj] w u tail = 1 1 : w-Di; ... l n : w-D„ ; tail-f . 
+
+PROOF. By induction on the derivation of C <: Obj. Similar to the proof of 
+lemma 10. □ 
+
+Lemma 12 (ROWS coherence). If C <: A, <T> I— u :: Type, $ b w :: ken, and 
+<I> b tail :: ktail[ C], then Rows[ A, Obj] w u (Roms[C, A] w u tail) = Roms[C, Obj] w u tail. 
+
+PROOF. By induction on the derivation of C <: A. The base case (C = A) holds 
+trivially. Now, let CT( C) = class C <1 B {...} where B <:A. The rule for 
+.Roms[C, A] defines a tuple {f= .... m= ...} which we will call tail'. Specifically, 
+Rows [C, A] w u tail = Rows [B, A] w u tai! . Now, using tail 7 in the inductive hypoth¬ 
+esis, we find that Roms[A. Obj] w u (Roms[B,A] w u tail 7 ) = Roms[B, Obj] w u tail 7 . 
+According to the definition, Roms[B, Obj] w u tail 7 = Roms[C,0bj] w u tail, where 
+tail' is the same as above. Substituting equals for equals (twice) yields 
+
+Roms[A, Obj] w u (RomsfC, A] w u tail) = Rows[ C, Obj] w u tail 
+
+□ 
+
+C.3 Object transformations 
+
+Lemma 13 (Well-typed pack). If $ b tail :: ktail[ C] and 
+§;Abe: SelfTy[ C] (World u) u tail, then $;Ab pack[C; u; tail; e] : (World u)-C. 
+
+PROOF. By inspection of the definitions, using the term formation rules for fold 
+(10) and pack (1). □ 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+35 
+
+
+Lemma 14 (Well-typed upcast). If $;Ahe: (World u)-C and C <: A, then 
+$;Ah UPCASt[C; A; u; e]: ( World u)-A. 
+
+PROOF. By inspection of the definitions, using the term formation rules for open 
+(2) and unfold (11) and lemmas 8, 12, and 13. Unfolding e produces a term of type 
+ObjTy[ C] ( World u) u. Opening this introduces type variable tail :: ktail[ C] and term 
+variable x: SelfTy[ C] (World u) u tail; call this new environment <f>'; A'. The body 
+of the open contains a PACK expression, but in order to use lemma 13, we must 
+establish the following: 
+
+(1) 4>' b i?ows[C,A] (World u) u tail :: ktail[ A], and 
+
+(2) 4>'; A' b x: SelfTy[k] (World u) u (i?oms[C,A] (World u) u tail). 
+
+The first follows from lemma 8. The second reduces to 
+
+<!>' b SelfTy[ A] (World u) u (Rows[ C, A] (World u) u tail) = 
+
+SelfTy{ C] (World u) u tail :: Type 
+
+By expanding the definition of SelfTyf] and applying equivalence rules, it reduces 
+again to 
+
+b Rows[h, Obj] (World u) u (Rows[C, A] (World u) u tail) = 
+
+Rows[C, Obj] (World u) u tail :: ktail{ Obj] 
+
+which follows from lemma 12. Finally, lemma 13 can be invoked to show that the 
+result of the upcast has type (World u)-A. 
+
+□ 
+
+C.4 Type preservation for expressions 
+
+FJ contexts are translated to type environments as follows: 
+
+ENV[u; r, x : D] = ENV[u; F], x : (World u)-D 
+env[u; o] = o 
+
+Lemma 15 (Context translation). If 4> b u :: Type and range(r) C cn, 
+then <I> b env[u; T] type env. 
+
+PROOF. By inspection. □ 
+
+Theorem 5 (Type preservation). If 4> b u :: Type, 
+
+$;Ab classes: {Classes (World u) u} and r b e 6 C, then 
+$; A, ENV[u; r] b exp[T; u; classes; e]: (World u)-C. 
+
+PROOF. By induction on the structure of e. We use the following abbreviations: 
+Ar for env[u; F]; Ap for A, Ar; and e for EXP[F; u; classes; e]. 
+
+Case VAR. e = x and, from (T-Var), C = T(x). Thus, Ap(x) = (World u)-C and 
+$; Ap b e: (World u)-C. 
+
+Case FIELD, e = e 0 .f, and C = Cj, where T b e 0 C Co and fields( C 0 ) = 
+Ci f x... C n f n . By inductive hypothesis, <!>;Ap b eo : (World u)-C 0 . The code in 
+(field) unfolds and opens eg- Using the same argument as in the proof of lemma 14, 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+36 
+
+
+Christopher League et al. 
+
+
+this introduces the type variable tail:: ktail[ Co] and term variable x: SelfTy [C 0 ] (World u) u tail 
+call this new environment <j> / ; Ajb Unfolding x yields a term of type 
+
+{vtab : ... ; (Rows[C 0 , Obj] (World u) u tail)-f} 
+
+Using lemma 7, (fj,Cj) G fieldvec( Co). Using lemma 11, we hnd that the row 
+(i?ows[Co, Obj] (World u) u taiI)-f contains a binding f } ;: (World u)-C;. Using record 
+selection, 4>; Ap b (unfold x ... ).f;: (World u)-C, ; . Exiting the scope of the open, 
+we conclude 4>; Ap b e: (World u)-C ?; . 
+
+Case INVOKE. e = eo-m(ei...e n ), where T b eo £ Co, mtype( m, Co) = Di... D„->C, 
+r b e, £ Ci, and C, <: D,, for alii G {1... n}. We use the inductive hypothesis on e 0 , 
+and the same unfold-open-unfold argument as in the previous case. Selecting vtab 
+yields a term of type {(Rows [C 0 , Obj] (World u) u tail)-m (SelfTy[ Co] (World u) u tail)} 
+
+Using lemma 6, (m, Di... D„->C) G methvec( Co). Using lemma 10, the above record 
+contains a binding 
+
+m: (SelfTy [Co] (World u) u tail)—► 7)/[self; World u; Di... D n ->C] 
+
+= m: (SelfTy[ C 0 ] (World u) u tail )—>(World u)-Di —* ... 
+
+(World u)-D n —> (World u)-C 
+
+Thus, selecting m and applying it to x yields a term of type 
+
+(World u)-Di—» ... (World u)-D „—>(World u)-C 
+
+Now, for each i in 1.. . n, we use the inductive hypothesis on e*, concluding that 
+<l>: A} b e-i : (World u)-Cj. Using this and C; <: D,. lemma 14 1 tells us that <l»: A} b 
+UPCAST[Cj; D»; u;ej]: (World u)-D, Finally, using the application formation rule n 
+times, $; A} b e: (World u)-C. 
+
+Case new. e = new C(ei...e n ), where T b G Ci, fields( C) = Di f j... D„ f n , 
+and Ci <: D; for all i in 1... n. From the premise <f>; A b classes : { Classes (World u) u} 
+using the rules for selection (of C), application, and selection (of new), the new 
+component has type (World u)-Di—►... (World u)-D „—>(World u)-C. Just as in the 
+previous case, we use the inductive hypothesis and lemma 14 on each ej. Again, 
+using the application formation rule n times yields dy A} b e: (World u)-C. 
+
+Case UPCAST, follows from inductive hypothesis and lemma 14. 
+
+Case DNCAST. e = (C)e 0 where T b e 0 G D. We use the inductive hypothesis 
+on eo and the usual unfold-open-unfolcl sequence. We select dyncast from the vtab 
+and self-apply; this produces a polymorphic function of type 
+
+Va. (u—>-maybe a )—MTiaybe a 
+
+Next we instantiate a with (World u)-C and apply to the class tag, which the 
+correct type: u—s-maybe (World u)-C. The result has type maybe (World u)-C, and 
+using the case formation rule, the first branch has type (World u)-C. The other 
+branch aborts evaluation, but is regarded as having the same type. So, finally, 
+$;Apbe: (World u)-C. 
+
+□ 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+37 
+
+
+C.5 Class components 
+
+Lemma 16 (Well-typed CONSTRUCTOR). If <1> h u :: Type and $;Ah vtab : 
+Dict[ C] ( World u) u (SelfTy[ C] ( World u) u Empty[ C]), then $;A h NEW[C; u;vtab] : 
+Ctor[ C] (World u). 
+
+PROOF. By inspection, using lemma 11. □ 
+
+Lemma 17 (Well-typed dictionary). If <E> I- u :: Type, 
+
+$; A h inj : ( World u)-C— hj, and <J>; A h classes: {Classes (World u) u}, then 
+d>; A h dict[C; u; inj; classes] : Vtail. Dict\ C] (World u) u (SelfTy[ C] ( World u) u tail). 
+
+PROOF. By inspection, using lemma 10. □ 
+
+Theorem 6 (Well-typed class declaration). <3>: A h cdec[C] : ClassF[ C] 
+
+PROOF. By inspection, using lemmas 16 and 17 for the non-trivial class compo¬ 
+nents. □ 
+
+ACKNOWLEDGMENTS 
+
+Dachuan Yu wrote the operational semantics for the target language (§B.3) and 
+supplied many details for the soundness proofs (§B.4). We also wish to thank the 
+anonymous referees for their many helpful comments. 
+
+REFERENCES 
+
+Abadi, M. and Cardelli, L. 1996. A Theory of Objects. Springer, New York. 
+
+Abadi, M., Cardelli, L., and Viswanathan, R. 1996. An interpretation of objects and object 
+types. In Proc. Symp. on Principles of Programming Languages. ACM, New York, 396-409. 
+Abadi, M. and Fiore, M. P. 1996. Syntactic considerations on recursive types. In Proc. 11th 
+Annual IEEE Symp. on Logic in Computer Science. 242-252. 
+
+Bracha, G., Odersky, M., Stoutamire, D., and Wadler, P. 1998. Making the future safe for the 
+past: Adding genericity to the Java programming language. In Proc. Conf. on Object-Oriented 
+Programming Systems, Languages, and Applications. ACM, New York, 183-200. 
+
+Bruce, K. B. 1994. A paradigmatic object-oriented programming language: Design, static typing 
+and semantics. J. Functional Programming 4, 2, 127-206. 
+
+Bruce, K. B., Cardelli, L., and Pierce, B. C. 1999. Comparing object encodings. Information 
+and Computation 155, 1-2, 108-133. 
+
+Canning, P., Cook, W., Hill, W., Olthoff, W., and Mitchell, J. C. 1989. F-bounded poly¬ 
+morphism for object-oriented programming. In Proc. Int’l Conf. on Functional Programming 
+and Computer Architecture. ACM, 273-280. 
+
+Cardelli, L. and Leroy, X. 1990. Abstract types and the dot notation. In Proc. IFIP Working 
+Conf. on Programming Concepts and Methods. Israel, 466-491. 
+
+Crary, K. 1999. Simple, efficient object encoding using intersection types. Tech. Rep. CMU-CS- 
+99-100, Carnegie Mellon University, Pittsburgh. January. 
+
+Crary, K., Harper, R., and Puri, S. 1999. What is a recursive module? In Proc. Conf. on 
+Programming Language Design and Implementation. ACM, New York. 
+
+Eifrig, J., Smith, S., Trifonov, V., and Zwarico, A. 1995. An interpretation of typed OOP in 
+a language with state. Lisp and Symbolic Comput. 8, 4, 357—397. 
+
+Fisher, K. and Mitchell, J. C. 1998. On the relationship between classes, objects and data 
+abstraction. Theory and Practice of Object Systems 4 > 1? 3—25. 
+
+Fisher, K. and Reppy, J. 1999. The design of a class mechanism for MOBY. In Proc. Conf. on 
+Programming Language Design and Implementation. ACM, New York. 
+
+Fisher, K., Reppy, J., and Riecke, J. G. 2000. A calculus for compiling and linking classes. In 
+Proc. European Symp. on Program. 135-149. 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+38 
+
+
+Christopher League et al. 
+
+
+Girard, J. Y. 1972. Interpretation fonctionnelle et elimination des coupures dans l’arithmetique 
+d’ordre superieur. Ph.D. thesis, University of Paris VII. 
+
+Glew, N. 2000a. An efficient class and object encoding. In Proc. Conf. on Object-Oriented 
+Programming Systems, Languages, and Applications. ACM. 
+
+Glew, N. 2000b. Low-level type systems for modularity and object-oriented constructs. Ph.D. 
+thesis, Cornell University. 
+
+Goguen, H. 1995. Typed operational semantics. In Typed Lambda Calculi and Applications , 
+M. Dezani-Ciancaglini and G. Plotkin, Eds. LNCS, vol. 902. Springer-Verlag, Berlin, 186-200. 
+
+Harper, R. and Morrisett, G. 1995. Compiling polymorphism using intensional type analysis. 
+In Proc. Symp. on Principles of Programming Languages. ACM, New York, 130-141. 
+
+Harper, R. and Stone, C. 1998. A type-theoretic interpretation of Standard ML. In Proof, 
+Language, and Interaction: Essays in Honour of Robin Milner , G. Plotkin, C. Stirling, and 
+M. Tofte, Eds. MIT Press, Cambridge, Mass. 
+
+Igarashi, A. and Pierce, B. C. 2001. On inner classes. Information and Computation ?, ? (to 
+appear). 
+
+Igarashi, A., Pierce, B. C., and Wadler, P. 1999. Featherweight Java: A minimal core calculus 
+for Java and GJ. In Proc. Conf. on Object-Oriented Programming Systems, Languages, and 
+Applications. ACM, New York, 132-146. 
+
+Kamin, S. 1988. Inheritance in Smalltalk-80: A denotational definition. In Proc. Symp. on 
+Principles of Programming Languages. ACM, New York, 80-87. 
+
+Krall, A. and Grafl, R. 1997. CACAO—a 64-bit Java VM Just-In-Time compiler. In Proc. 
+ACM PPoPP’97 Workshop on Java for Science and Engineering Computation. 
+
+League, C., Shao, Z., and Trifonov, V. 1999. Representing Java classes in a typed intermediate 
+language. In Proc. Int’l Conf. Functional Programming. ACM, Paris, 183-196. 
+
+League, C., Trifonov, V., and Shao, Z. 2001a. Functional Java bytecode. In Proc. 5th World 
+Conf. on Systemics, Cybernetics, and Informatics. Workshop on Intermediate Representation 
+Engineering for the Java Virtual Machine. 
+
+League, C., Trifonov, V., and Shao, Z. 2001b. Type-preserving compilation of Featherweight 
+Java. In Proc. Int’l Workshop on Foundations of Object-Oriented Languages. London. Ex¬ 
+panded version to appear in ACM Trans, on Programming Languages and Systems. 
+
+Mitchell, J. C. and Plotkin, G. D. 1988. Abstract types have existential type. ACM Trans¬ 
+actions on Programming Languages and Systems 10, 3 (July), 470-502. 
+
+Morrisett, G., Crary, K., Glew, N., Grossman, D., Samuels, R., Smith, F., Walker, D., 
+Weirich, S., and Zdancewic, S. 1999. TALx86: A realistic typed assembly language. In Proc. 
+Workshop on Compiler Support for Systems Software. ACM, New York, 25-35. 
+
+Morrisett, G., Tarditi, D., Cheng, P., Stone, C., Harper, R., and Lee, P. 1996. The TIL/ML 
+compiler: Performance and safety through types. In Proc. Workshop on Compiler Support for 
+Systems Software. ACM, New York. 
+
+Morrisett, G., Walker, D., Crary, K., and Glew, N. 1999. From System F to typed assembly 
+language. ACM Trans, on Programming Languages and Systems 21, 3 (May), 528-569. 
+
+Necula, G. C. 1997. Proof-carrying code. In Proc. Symp. on Principles of Programming Lan¬ 
+guages. ACM, Paris, 106-119. 
+
+Necula, G. C. and Lee, P. 1996. Safe kernel extensions without run-time checking. In Proc. 
+USENIX Symposium on Operating Systems Design and Implementation. ACM, Seattle, 229- 
+243. 
+
+Peyton Jones, S. L., Hall, C., Hammond, K., Partain, W., and Wadler, P. 1992. The Glasgow 
+Haskell Compiler: A technical overview. In Proc. UK Joint Framework for Inform. Tech. 
+
+Pierce, B. C. and Turner, D. N. 1994. Simple type-theoretic foundations for object-oriented 
+programming. J. Functional Programming j, 2 (April), 207-247. 
+
+Proebsting, T. A., Townsend, G., Bridges, P., Hartman, J. H., Newsham, T., and Watter- 
+SON, S. A. 1997. Toba: Java for applications: A way ahead of time (WAT) compiler. In Proc. 
+Third Conf. on Object-Oriented Technologies and Systems (COOTS’97). 
+
+Remy, D. 1993. Syntactic theories and the algebra of record terms. Tech. Rep. 1869, INRIA. 
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+
+Type-Preserving Compilation of Featherweight Java 
+
+
+39 
+
+
+Remy, D. and Vouillon, J. 1997. Objective ML: A simple object-oriented extension of ML. In 
+Proc. Symp. on Principles of Programming Languages. ACM, New York, 40-53. 
+
+Reynolds, J. C. 1974. Towards a theory of type structure. In Proc. Colloque sur la Programma- 
+tion. LNCS, vol. 19. Springer-Verlag, Berlin, 408-425. 
+
+Shao, Z. 1997. An overview of the FLINT/ML compiler. In Proc. 1997 ACM SIGPLAN Work¬ 
+shop on Types in Compilation. Published as Boston College Computer Science Dept. Technical 
+Report BCCS-97-03. 
+
+Shao, Z. and Appel, A. W. 1995. A type-based compiler for Standard ML. In Proc. Conf. on 
+Programming Language Design and Implementation. ACM, La Jolla, 116-129. 
+
+Shao, Z., League, C., and Monnier, S. 1998. Implementing typed intermediate languages. In 
+Proc. Int’l Conf. Functional Programming. ACM, Baltimore, 313-323. 
+
+Tarditi, D., Morrisett, G., Cheng, P., Stone, C., Harper, R., and Lee, P. 1996. TIL: A 
+type-directed optimizing compiler for ML. In Proc. Conf. on Programming Language Design 
+and Implementation. ACM, New York. 
+
+Vanderwaart, J. C. 1999. Typed intermediate representations for compiling object-oriented 
+languages. Williams College Senior Honors Thesis. 
+
+Wright, A., Jagannathan, S., Ungureanu, C., and Hertzmann, A. 1998. Compiling Java to a 
+typed lambda-calculus: A preliminary report. In Proc. Int’l Workshop on Types in Compilation. 
+LNCS, vol. 1473. Springer, Berlin, 1-14. 
+
+
+Received May 2001 
+
+
+ACM Transactions on Programming Languages and Systems, Vol. TBD, No. TDB, Month Year. 
+
+
+

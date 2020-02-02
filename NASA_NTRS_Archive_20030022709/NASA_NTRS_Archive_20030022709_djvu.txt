@@ -1,0 +1,1914 @@
+Foundations of the Bandera Abstraction Tools* 
+
+
+John Hatcliff 1 , Matthew B. Dwyer 1 , Corina S. Pasareanu 2 , and Robby 1 
+
+1 Department of Computing and Information Sciences, Kansas State University * * * 
+2 Kestrel Technology, NASA Ames Research Center 1 
+
+
+Abstract. Current research is demonstrating that model-checking and 
+other forms of automated finite-state verification can be effective for 
+checking properties of software systems. Due to the exponential costs 
+associated with model-checking, multiple forms of abstraction are of- 
+ten necessary to obtain system models that are tractable for automated 
+checking. 
+
+The Bandera Tool Set provides multiple forms of automated support 
+for compiling concurrent Java software systems to models that can be 
+supplied to several different model-checking tools. In this paper, we de- 
+scribe the foundations of Bandera’s data abstraction mechanism which 
+is used to reduce the cardinality (and the program’s state-space) of data 
+domains in software to be model-checked. From a technical standpoint, 
+the form of data abstraction used in Bandera is simple, and it is based on 
+classical presentations of abstract interpretation. We describe the mech- 
+anisms that Bandera provides for declaring abstractions, for attaching 
+abstractions to programs, and for generating abstracted programs and 
+properties. The contributions of this work are the design and implemen- 
+tation of various forms of tool support required for effective application 
+of data abstraction to software components written in a programming 
+language like Java which has a rich set of linguistic features. 
+
+
+1 Introduction 
+
+Current research is demonstrating that model-checking and other techniques for 
+automated finite-state verification can be applied directly to software in written 
+in widely used programming languages like C and Java [1, 3, 4, 15, 28]. Although 
+they may vary substantially in the specifics, in essence each of these techniques 
+
+* This work was supported in part by NSF under grants CCR-9703094, CCR-9708184, 
+CCR-9896354, and CCR-9901605, by the U.S. Army Research Laboratory and the 
+U.S. Army Research Office under agreement DAAD190110564, by DARPA/IXO’s 
+PCES program through AFRL Contract F33615-00-C-3044, by NASA under grant 
+NAG-02-1209, by Intel Corporation under grant 11462, and was performed for the 
+
+— Formal-Verification of- Int egrat ed-Modul an -Av-ionics-Software -Cooperative- Agree-- 
+ment, NCC- 1-399, sponsored by Honeywell Technology Center and NASA Langley 
+Research Center. 
+
+* 234 Nichols Hall, Manhattan KS, 66506, USA. 
+
+{hatcliff ,dwyer, robby }<3cis. ksu.edu 
+
+1 Moffet Field, CA, 94035-1000, USA. pcorinaQemail.arc.nasa.gov 
+
+
+exhaustively checks a finite-state model of a system for violations of a system 
+requirement formally specified by some assertion language or in some temporal 
+logic _(e,g.-, LTL [22]). Finite-state verification is attractive because it automati- 
+cally and exhaustively checks all behaviors captured in the system model against 
+the given requirement. A weakness of this approach is that it is computation- 
+ally very expensive (especially for concurrent systems) due to the huge number 
+of system states, and this makes it difficult to scale the approach to realistic 
+systems. 
+
+The widespread adoption of Java with its built-in concurrency constructs 
+and emphasis on event-based programming has led to a state of affairs where 
+correct construction of multi-threaded reactive systems, which was previously a 
+domain for experienced programmers, must be tackled by novice programmers. 
+Moreover, Java is being used increasingly in embedded systems where it is more 
+important to detect and remove errors before initial deployment. Thus, there 
+is substantial motivation for building model-checking tools to assess the effec- 
+tiveness of applying software model-checking to Java. Central to any such tool 
+should be abstraction mechanisms that are employed to reduce the number of 
+states encountered during the exploration of software models. 
+
+The Bandera Tool Set is an int egrat ed collection of program analysis, trans- 
+formation, and visualization components designed to facilitate experimentation 
+with model-checking Java source code. Bandera takes as input Java source code 
+and a software requirement formalized in Bandera’s temporal specification lan- 
+guage, and it generates a program model and specification in the input language 
+of one of several existing model-checking tools (including Spin [16], dSpin [9], and 
+JPF [3]). Both program slicing and user extensible data abstraction components 
+are applied to form abstract prdgram models customized the to the property 
+being checked. When a model-checker produces an error trail, Bandera renders 
+the error trail at the source code level and allows the user to step through the 
+code along the path of the trail while displaying values of variables and internal 
+states of Java lock objects. 
+
+Various forms of predicate abstraction [1,3,28] and data abstraction [8,10, 
+27] have been used in model-checking, and there is a wide body of literature 
+on these techniques. Given this rich resource upon which to build our abstrac- 
+tion facilities in Bandera, our particular choice of abstraction techniques was 
+influenced by multiple requirements outlined below. 
+
+(I) The abstraction facilities should be easy to understand and apply by software 
+engineers with little technical background in formal semantics: This is a basic 
+requirement if Bandera is to be applied effectively by a broad spectrum of users. 
+
+
+(II) The abstraction capabilities should integrate well with the dynamic features 
+found in Java: In Java programs, features such as dynamic thread/object cre- 
+ation and traversal of heap-allocated data are ubiquitous. Existing work on pred- 
+icate abstraction and automated refinement [1,28] has focused on software that 
+relies on integer computation and pointers that are restricted to referencing 
+
+
+static data. Automated counter-example-driven abstraction refinement for pro- 
+grams with dynamically allocated data/threads is still an open research area. 
+
+(III) The abstraction process should scale to realistic software systems : Methods . 
+for selecting abstractions and methods for constructing abstract programs should 
+not degrade dramatically as the size of programs considered increases. 
+
+(IV) The abstraction process should be decoupled from model-checker engines: 
+Bandera encapsulates existing model-checkers and does not modify their func- 
+tionality. Thus, any abstraction process implemented by Bandera needs to be 
+accomplished outside of any encapsulated model-checkers. 
+
+Bandera addresses Requirement I by providing a easy-to-use and flexible 
+mechanism for defining abstractions. Complex domain structures are avoided by 
+embracing only domains that can be represented as powersets of finite sets of 
+“abstract tokens” . These domains (along with appropriate abstract versions of 
+operators) form abstract types that users can associate with program variables. 
+An abstract type inference takes as input an abstract type environment that 
+gives abstraction selections for a small set of relevant program variables and 
+then propagates this information through the entire program. This significantly 
+"rediTc^TE^amount of effort fluffed “by users' to specify Kow a system 'should 
+be abstracted. 
+
+Bandera addresses Requirement II by taking advantage of the fact that 
+the type-based data abstraction process described above can be applied in a 
+component- wise manner to fields of different classes. This allows components 
+of heap-allocated data to be abstracted without considering more complicated 
+forms of, for example, shape analysis or predicate abstraction. 
+
+Bandera addresses Requirement III by precomputing definitions of abstract 
+operations (using a theorem prover) and then compiling those definitions into the 
+Java source code to form an abstract program. Thus, the repeated (expensive) 
+calls to a theorem prover used in predicate abstraction approaches are not needed 
+during abstract program construction or the model-checking process. 
+
+Bandera addresses Requirement IV by transforming the Java source code of 
+program such that concrete operations on types to be abstracted are replaced by 
+corresponding calls to generated abstraction operations. Since the abstraction 
+process takes places at the source level, existing model-checking engines do not 
+have to be modified to incorporate abstraction mechanisms. 
+
+In summary, we have arrived at the form of abstraction used in Bandera by 
+balancing a number of competing goals. Bandera’s abstraction facilities are less 
+automatic than the automated predicate abstraction and refinement techniques 
+of other tools, but they are much less expensive and can be used immediately in 
+the presence of concurrency and dynamically allocated data without any techni- 
+cal extensions. Moreover, we have found the facilities to be effective in reasoning 
+about a variety of real Java systems. 
+
+The tool-oriented aspects of Bandera’s abstraction facilities have been de- 
+scribed in detail elsewhere [10]. In this paper, we focus on technical aspects 
+of the facilities. Section 2 reviews the methodology that users typically follow 
+
+
+
+when applying Bandera. Section 3 describes the program/property syntax and 
+semantics for a simple flowchart language which we will use to present techni- 
+cal aspects of Bandera’s abstraction facilities. Section 4 presents a formal view 
+of Bandera’s abstraction definitions and how decision procedures are used to 
+automatically construct definitions of abstract operators and tests. Section 5 
+describes Bandera’s abstract type inference mechanism that is used to bind ab- 
+straction declarations to program components. Section 6 outlines how Bandera 
+uses the abstraction bindings calculated above to generate an abstracted pro- 
+gram. Section 7 describes how chosen program abstractions should also give rise 
+to appropriate abstractions of the property being checked. Section 8 summarizes 
+related work, and Section 9 concludes. 
+
+2 The Bandera Abstraction Facilities 
+
+Bandera is designed to support a semi-automated abstraction methodology. The 
+goal of this methodology is to minimize the amount of information that user’s 
+need to supply to perform an abstract model check of a given property on a Java 
+system. The main steps in applying Bandera are: 
+
+rrTdehtify the portion of the system to be analyzed; 
+
+2. Formalize the property in the Bandera Specification Language; 
+
+3. Compile the system and property; 
+
+4. Define and select the abstractions to be used; 
+
+5. Generate an abstracted system model and property; 
+
+6. Execute a model check on the abstracted system model; and 
+
+7. Analyze any generated counter-examples for feasibility. 
+
+Bandera provides various forms of automated support for Step 1. Once the sys- 
+tem has been closed, in Step 2 the user formalizes properties to be checked using 
+the Bandera Specification Language (BSL) [5] — a language for defining proposi- 
+tions/predicates on a program’s control points and data state and for expressing 
+temporal relationships between declared propositions. In Step 3, Bandera com- 
+piles a closed Java unit and the property specification down to a three-address 
+intermediate form called Jimple - part of the Soot [29] Java compiler infrastruc- 
+ture. After transformations in Steps 4 and 5 and other transformations such as 
+slicing have completed, Jimple is transformed to a lower-level intermediate rep- 
+resentation called the Bandera Intermediate Representation (BIR). A detailed 
+presentation of BIR’s semantics and the translation of Java to BIR and BIR to 
+Promela, the Spin model-checker’s input language, is available in [18]. 
+
+In the remainder of this section, we provide a brief overview of Steps 4-7. 
+We emphasize the toolset components related to the definition of abstractions 
+ancLthe _encoding_of abstract system. models and prope rties. 
+
+2.1 Defining and Selecting Abstractions 
+
+Users select abstractions by considering the semantics of predicates appearing 
+in the property to be checked and the program expressions that can exert either 
+
+
+
+control or date influences on those predicates. In [10] we describe tool support in 
+Bandera that allows users to query and explore the program dependence graph 
+that is generated by using a property’s predicates to derive a slicing criterion. 
+While strategies for exploiting this tool support to identify the program variables 
+that should be abstracted and the semantics that should be preserved by such 
+an abstraction are relevant for users of Bandera, in this paper, we assume that 
+such a determination has been made. The user carries out the balance of the 
+abstraction process by interacting with the Source Level Abstraction (SLABS) 
+Bandera tool components displayed in Figure 1. 
+
+Bandera includes an abstraction library containing definitions of common 
+abstractions for Java base types from which users can select. If necessary, the 
+user specifies new abstractions using the rule-based Bandera Abstraction Spec- 
+ification Language (BASL). For Java base types, the user need only define an 
+abstract domain, and abstract versions of concrete operations are generated au- 
+tomatically using the decision procedures of the PVS theorem prover [24]. The 
+abstraction definitions are then compiled to a Java representation and added to 
+the library. 
+
+The user declares how program components should be abstracted by binding 
+class fields to entries from the abstraction library. It is usually only necessary 
+to attach abstraction to a relatively few variables since the toolset contains an 
+abstract type-inference phase that automatically propagates the abstract type 
+information to remaining program components. When abstract type inference is 
+complete, the concrete Jimple program representation is transformed to abstract 
+Jimple by replacing concrete constants and operations by abstract tokens and 
+operations drawn from the compiled abstraction representations in the abstrac- 
+tion library. We describe these steps in more detail in the subsections below. 
+
+
+
+
+abstraction EvenOdd abstracts int 
+begin 
+
+
+TOKENS = {EVEN, 0DD>; 
+
+abstract (n) 
+begin 
+
+n % 2 ** 0 -> {EVEN}; 
+n 7. 2 == 1 -> {ODD}; 
+end 
+end 
+
+Fig. 2 
+
+
+operator * mul 
+begin 
+
+(ODD, ODD) -> {ODD} ; 
+(_. _) -> {EVEN} ; 
+end 
+
+
+operator > gt 
+begin 
+
+(_, _) -> {true, false} 
+end 
+
+
+BASL definition of EvenOdd AI (excerpts) 
+
+
+Defining Abstractions Bandera provides BASL - a simple declarative spec- 
+ification language that allows users to define the three components of an AI 
+described above. 
+
+Figure 2 illustrates the format of BASL for abstracting base types by show- 
+ing excerpts of the even-odd AI specification. The specification begins with a 
+definition of a set of tokens — the actual abstract domain will be the powerset 
+of the token set'. “Although^ one can imagine ' allowing users to "define arbitrary 
+lattices for abstract domains, BASL currently does not provide this capability 
+because we have found powersets of finite token sets to be easy for users to 
+understand and quite effective for verification. Following the token set defini- 
+tion, the user specifies the abstraction function which maps concrete values (in 
+this case, integers) to elements of the abstract domain. After the abstraction 
+function, the BASL specification for base types must contain a definition of an 
+abstract operator for each corresponding basic concrete operator. 
+
+Abstract operator definitions can be generated automatically from the BASL 
+token set and abstraction function definitions for integer abstractions using the 
+elimination method based on weakest pre-conditions from [2]. Using this ap- 
+proach makes it extremely easy for even novice users to construct new AIs for 
+integers. Given a binary concrete operator op, generation of the abstract opera- 
+tor op a ^ s applied to a particular pair of abstract tokens a x and a 2 proceeds as 
+follows. The tool starts with the most general definition (i.e., it assumes that 
+op a b s ( a u a 2 ) can output any of the abstract tokens - which trivially satisfies the 
+safety requirement). Then, for each token in the output, it checks to see (using 
+the theorem prover PVS [24]) if the safety property would still hold if the token 
+is eliminated from the output. An abstract token can be safely eliminated from 
+the output token set if the result of the concrete operation applied to concrete 
+values cannot be abstracted to that abstract value. 
+
+BASL also includes formats for specifying AIs for classes and arrays. Class 
+abstractions are defined component- wise: the BASL format allows the user to 
+assign AIs to each field of the class. BASL’s array format allow specification of 
+an integer abstraction for the array index and an abstraction for the component 
+type [10]. 
+
+
+
+
+A Library of Abstractions Since they are so widely applied, abstractions for 
+integers are organized into several different families including the concrete (or 
+identity ), range , set, modulo and point families which we discuss below. 
+
+A concrete AI (also known as an identity AI) performs no abstraction at all, 
+but rather preserves all concrete values and uses the original concrete operations 
+on these. A range AI tracks concrete values between lower and upper bounds l 
+and u but abstracts values less than l and greater than u by using a token set of 
+the form { belowl , u, aboveu }; an abstraction that preserves the sign of values 
+
+is a range-(0, 0) abstraction. A set AI can often be used instead of a range AI 
+when no operations other than equality are performed (e.g., when integers are 
+used to simulate an enumerated type). For example, a set AI that tracks the 
+concrete values 3 and 5 would have the token set {three, five, other}. A moauio-k 
+AI merges all integers that have the same remainder when divided by k. The 
+EvenOdd abstraction with token set {EVEN, ODD} is a modulo-2 abstraction. 
+Finally, the token set for the point AI includes a single token unknown . The 
+point abstraction function maps all concrete values to this single value; this has 
+the effect of throwing away all information about the data domain. 
+
+...Defining JField Abstractions Bandera includes tool support to ease the pro- 
+cess of binding class fields to abstractions. Abstractions are indexed by type, 
+thus when the user considers a field, such as BoundedBuffer .bound, the type, 
+int, can be used to present the candidate abstractions from the library as il- 
+lustrated in Figure 3. The user selects from these abstractions and repeats the 
+process for other variables that have been determined to require abstraction. 
+Once all such bindings have been made the tools calculate abstractions for all 
+other fields in the program. The resulting inferred abstract types are displayed 
+for the user to view as illustrated at the bottom of Figure 3. Conflicts in the 
+inferred type for a given field are presented to the user for resolution. Fields 
+which are unconstrained by the type inference can be set to a default type which 
+is usually either the concrete type or the point abstraction. 
+
+2.2 Generating an Abstracted System Model and Property 
+
+Generating an abstract program involves three separate steps. First, given a 
+selection of AIs for a program’s data components, the BASL specification for 
+each selected AI is retrieved from the abstraction library and compiled into 
+a Java class that implements the AI’s abstraction function and abstract opera- 
+tions. Second, the given concrete Java program is traversed, and concrete literals 
+and operations are replaced with calls to classes from the first step that imple- 
+ment the corresponding abstract literals and operations. The resulting abstract 
+program yields an over-approximation of the concrete program’s behavior. An 
+over-approximation ensures that every behavior in the concrete program that 
+violates a given property is also present in the abstract program. To ensure the 
+soundness of verification results, the third step abstracts the property to be 
+checked so as to under-approximate the set of behaviors described by the origi- 
+nal property. An under-approximation ensures that any program behavior that 
+
+
+
+Fig* 3. Abstraction selection and abstract type inference 
+
+
+is contained in the set of behaviors described by the abstract property will also 
+be contained in the set of behaviors described by the original property (these 
+issues are discussed in greater detail below and in Section 7). 
+
+Compiling Abstractions to Java Figure 4 shows excerpts of the Java repre- 
+sentation of the BASL even-odd specification in Figure 2. Abstract tokens are 
+implemented as integer values (constructed by shifting 1 into the position indi- 
+cated by the bit mask declarations), and the abstraction function and operations 
+have straightforward implementations as Java methods. The most noteworthy 
+aspect of the implementation is the modeling of the approximation that ari ses 
+due to abstraction. The approximate nature of the even-odd abstraction means 
+that a “greater than” comparison of any pair of abstract values could be true or 
+false. Instead of representing such sets directly (e.g., as a bit vector), a single 
+value is chosen non-deterministically from the set of possible values. This is valid 
+when the meaning of a particular program is taken to be the collection of all 
+
+
+
+
+
+
+public class EvenOdd < 
+
+public static final int EVEN * 0; // bit mask 
+
+public static final int ODD =1; // bit mask 
+
+public static int abs(int n) { 
+
+if (n % 2 « 0) return (1 « EVEN) ; 
+
+if (a U ** 1 I I a 7. 2 ** -1) return (1 « ODD) ; 
+
+throw new RuntimeErceptionC) ; 
+
+> 
+
+public static int mul(int argl, int axg2) { 
+
+if (argl«(l « ODD) kk arg2**(i « ODD)) return (1 « ODD); 
+return (1 « EVEN) ; 
+
+> 
+
+public static boolean gt (int argl, int arg2) < 
+return Bandera. choose () ; 
+
+> 
+
+
+Fig. 4. Compilation of BASL EvenOdd AI (excerpts) 
+
+
+possible traces or executions of the program. In Figure 4, the Bandera, choose () 
+method denotes a non-deterministic choice between true and false values. This 
+"inethod^has no Jimple implementation rinstead ’wh^BaiKlera compiles the ai> 
+stracted program down to the input of given a model-checker, the method is 
+implemented in terms of the model-checker’s built-in constructs for expressing 
+non-deterministic choice. Since the model-checker will generate all paths leading 
+out of a non-deterministic choice, this ensures that all appropriate behaviors 
+are represented in the model. This approach has some interesting implications 
+compared to more tradition presentations of abstract interpretation. Using non- 
+determinism to model imprecision in this manner (in essence, by transforming 
+data imprecision into extra control paths), means that the abstract interpreta- 
+tion is maximally poly variant, and there is never any merging of information 
+using, for example, least-upper-bound operators. This approach can be effective 
+since abstract domains in Bandera are finite, of finite height, and typically quite 
+small. An alternative approach would be to use a set of abstract tokens to rep- 
+resent imprecision and to represent the set as a bit-vector. However, splitting 
+sets into single tokens using non-determinism as described above yields a much 
+simpler implementation. 
+
+
+Replacing Concrete Operators Traversing a given concrete program and 
+replacing each operation with a call to a corresponding abstract version is rela- 
+tively straightforward. The only challenge lies in resolving which abstract version 
+of an operation should be used when multiple AI’s are selected for a program. 
+
+Jrhis-pr-oblemuis-solved-b-y-the-abstract_ty-pe-inference-phase_outlinedin-the_pre- 
+
+vious section: in addition to propagating abstract type information to each of 
+the program variables, type inference also attaches abstract type information to 
+each node in the program’s syntax tree. For example, consider the code fragment 
+■ (x + y) + 2 where the user selected variable x to have type even-odd and y was 
+not selected for abstraction. This code fragment will be transformed into: 
+
+
+
+EvenOdd . add (EvenOdd . add (x , Coerce . IntToEvenOdd (v) ) , 
+
+EvenOdd.Even) ; 
+
+For the innermost concrete + operation, the user selection of even-odd for 
+x forces the abstract version of + to be EvenOdd. add. Assuming no other con- 
+texts force y to be abstracted, y will hold a concrete value, and thus a coercion 
+(Coerce . IntToEvenOdd) is inserted that converts y’s concrete value to an even- 
+odd abstract value. For the outermost +, since the left argument has an abstract 
+type of even-odd, the constant 2 in the right argument is “coerced” at translation 
+time to an even-odd abstract constant. 
+
+Property Abstraction Bandera’s program abstraction approach yields a model 
+in which execution states safely over-approximate the values of program vari- 
+ables. For example, a concrete state where variable x has the value 2 may be 
+approximated by a modulo-2 abstracted value of even. When abstracting prop- 
+erties, this can be problematic if the abstractions do not preserve the ability to 
+exactly decide the predicates in the property. Consider a predicate x==4 evalu- 
+ated in the example state described above. This predicate would appear to be 
+true in the abstract state, since 4 is clearly abstracted by even, but the predicate 
+
+evaluates-to-false in the. concrete-state* .... _ 
+
+Bandera abstracts the predicates appearing in the property being checked us- 
+ing an approach that is similar to [20]. Consider an AI for a variable x (e.g., signs) 
+that appears in a predicate ( e.g ., (x<l)). Bandera converts this to a disjunction 
+of predicates of the form x==a, where a are the abstract values that correspond 
+to values that imply the truth of the original predicate (e.g., x~neg implies x<l 
+as does x==zero, but x==pos does not). Thus, this abstract disjunction, x—zero 
+&& x==neg , under-approximates the concrete predicate insuring that the prop- 
+erty holds on the original program if it does on the abstract program. 
+
+2.3 Abstract Model Checking 
+
+The resulting abstracted program and property are converted to BIR from their 
+Jimple form and then to the input language of the selected model checker. 
+Bandera runs the model checker and displays the results to the user. Counter- 
+examples are mapped back to the unabstracted source program. 
+
+In addition to supporting exhaustive and sound verification of properties, 
+Bandera provides a number of useful bounded state-space exploration strategies. 
+Bounds can be placed on resources such as the size of integers and arrays, on the 
+number of threads allocated, and on the number of object instances allocated 
+at particular allocator sites. Bandera can construct models for existing model 
+checkers, such as Spin, that perform resource- bounded searches [18] that can often 
+yield effective bug-finding without performing any abstraction . These searches 
+can be thought of as depth-bounded searches where the depth of the search 
+is controlled by the bounds placed on different resources. When the bound is 
+exceeded for a particular resource along a particular execution path, the model- 
+checker simply aborts the search along that path and continues searching other 
+unexplored paths. 
+
+
+2.4 Counter-example Feasibility 
+
+Model checking an abstracted program may produce a counter-example that 
+is infeasible with respect to the program’s concrete semantics. Since counter- 
+examples may be very long and complex, user’s require tool support to assist 
+in the determination of feasibility. Bandera includes both an on-line technique 
+for biasing the state-space search to find guaranteed feasible counter-examples 
+and an off-line for simulating a counter-example on the abstract and concrete 
+programs and checking their correspondence. The former, while unsound, has 
+the advantage of being fast and surprisingly effective. A detailed presentation of 
+these techniques is given in [27]. 
+
+3 Program Syntax and Semantics 
+
+We noted in the previous section that Bandera translates Java programs into the 
+Jimple intermediate form. To capture the essence of the Jimple structure for our 
+formal overview of Bandera abstraction, we use the simple flowchart language 
+FCL of Gomard and Jones [13, 14,19]. 
+
+Since eur abstraction framework involves presentingabstraetien definitions as 
+
+types, we present a formalization of the framework using multi-sorted algebras. 
+This allows new abstractions to be introduced as new sorts/types. 
+
+
+3.1 Signatures and Algebras 
+
+A signature E is a structure containing a set Types[i7] of types (which must 
+include the distinguished type Bool), a non-reflexive subtyping relation 
+between the types of Types[I7] that forms an upper semi-lattice and for each 
+( 7 * 1 , 72 ) € a coercion symbol [r x <£• r 2 ], a set Ops[27] of typed operation 
+( e.g ., +), a set Tests[E] of typed test symbols (e.g., >), and a set Cons[I7] 
+
+of typed constant symbols (e.g., 2, 3). For notational simplicity, we will only 
+consider binary operations and tests. The type of an operation o € 0ps[I7] is 
+denoted [o]s = tl x t 2 -»r (similarly for tests and constants). For simplicity, 
+for operation types [o]z = r x x r 2 -4 r we assume r x = = r and for test 
+
+types [o}z = 7*1 x r 2 Bool we assume r x = tj* This corresponds to the type 
+structure of most of the built in base type operations in Java. 
+
+A i7-algebra is a structure containing for each r 6 Types[27] a semantic do- 
+main [r]£, for each pair (n,r 2 ) € a total coercion relation [[n <^zt 2 ]}£ C 
+f r iJr x [ r 2Jr? f° r eac k operation symbol o 6 Ops[27] with type r x r -4 r 
+a relation [oj^ C [rj£ x [rj^ x for each test symbol t e Tests[I7] 
+
+with type r x r -> Bool a total relation C [rj^ x [r]^ x [Bool] where 
+[B 00 IJ = {true, false}, and for each constant symbol c € Cons[i7] with type r 
+a set [c]£ C [t]£ (we will drop the super /sub-scripts E and A when these are 
+clear from the context). Using relations instead of functions to model the se- 
+mantics of operations and tests (and sets instead of a single value for constants) 
+provides a convenient way to capture the imprecision of abstractions. 
+
+
+
+In Bandera, the abstraction process begins by considering the concrete se- 
+mantics of a program which we will model using a basis configuration - a basis 
+signature Ubasis with 
+
+
+Types[£&dsts] = {Int, Bool}, 
+
+0ps[I7& a5 i 5 ] = { + , •}, 
+
+TeSts[i7&a*wj = {>,=,&&,||,...}, 
+
+Consf^a*#] = {..., -1,0, 1, - .., true, false} 
+
+and a basis algebra Agasis with the usual carrier sets for [Int] and [Bool], 
+the usual functional interpretation for operations and tests [+], [— ], [>], [=], 
+etc., and singleton set interpretations for integer and boolean constants, e.g 
+[1] = {1}, [true] — {true}. The subtyping relation is empty in the basis sig- 
+nature, because we use subtyping to express refinement relationships between 
+abstractions, and no abstractions appear in as yet unabstracted concrete pro- 
+grams. 
+
+
+3.2 Pro gram and Prop erty Syntax “ 
+
+Program syntax Figure 5 presents the definition of FCL syntax. An FCL 
+program consists of a list of parameters x* , a label l of the initial block to be 
+executed, and a non-empty list 6+ of basic blocks. Each basic block consists of 
+a label followed by a (possibly empty) list of assignments. Each block concludes 
+with a jump that transfers control from that block to another one. Even though 
+the syntax specifies prefix notation for operators, we will often use infix notation 
+in examples with deeply nested expressions to improve readability. As noted 
+earlier, the basis signature contains an empty subtyping relation, so coercion 
+expressions [t<^zt'] e will not appear in concrete programs to be abstracted. 
+
+Figure 6 presents an FCL program that computes the power function. The 
+input parameters to the program are m and n, and the initial block is specified by 
+the line (init). The parameters can be referenced and assigned to throughout 
+the program. Other variables such as result can be introduced without explicit 
+declaration. The initial value of a non-parameter variable is 0. The output of 
+program execution is the state of memory when the return construct is executed. 
+
+In the presentation of FCL semantics, we need to reason about nodes in a 
+statement-level control-flow graph (CFG),i.e., a graph where there is a separate 
+node n for each assignment and jump in a given program p. We will assume that 
+each statement (CFG node) has an identifier that is unique within the program, 
+and we will annotate each statement in the source code with its unique identifier. 
+For example, the first assignment in the loop block has the unique identifier (or 
+node number) [loop.l]. 
+
+To access code at particular program points within a given FCL-program, p, 
+we use the functions code\p ], firstjjp ], succ\p ], defined below. We will drop the \p] 
+argument from the functions when it is clear from the context. 
+
+
+
+Syntax Domains 
+
+
+p € Programs [E] 
+
+x € Variables [E] 
+
+b 6 Blocks [27] 
+
+T € Type-Identifiers [17] 
+
+l G Block-Labels [27] 
+
+e € Expressions [i7] 
+
+a 6 Assignments [27] 
+
+j G Jumps [17] 
+
+al 6 Assignment-Lists^] 
+
+0 € Ops [17] 
+t € Tests [17] 
+c € Cons[27] 
+
+Grammar 
+
+p ::= (**) (/) b + a : 
+
+= x := e; | skip; 
+
+b / : al j e : 
+
+= c 1 X I Te I o(e i,e 2 ) | t(e i,ei) 
+
+al ::= a* j : 
+
+= goto /; | return; | 
+
+
+if e then h else I 2 ; 
+
+Typing Rules (expressions) 
+
+T hr c : [c]r 
+
+r Hr x : r(x) 
+
+T hr e% : r 
+
+[o]r = txt — y T 
+
+r hr o(e, e) : r 
+
+r hr ei : r 
+
+[t]i; = r x r— >■ Bool 
+
+r hr £(ei, 62 ) : Bool 
+
+r hr e ■ t 
+
+(r,r') € <r 
+
+r hr [r Cr r'] e : r' 
+
+Fig. 5. Syntax of the Flowchart Language FCL for a signature 27 
+
+
+- The code map function code[p ] maps a CFG node n to the code for the 
+statement that it labels. Taking the program of Figure 6 as an example, 
+code([loop. 2]) yields the assignment n -(n 1);. 
+
+- The function firstfp] maps a label l of p to the first CFG node occurring in 
+the block labeled l. For example, first( loop) = [loop.l]. 
+
+- The function succ\p ] maps each node to the set of nodes which are immediate 
+successors of that node. For examples, succ([test.l]) = {[loop.l], [end. 1]}. 
+
+Property S yntax LTL [22] is a rich formalism for specifying state and action 
+sequencing properties of systems. An LTL specification describes the intended 
+behavior of a system on all possible executions. 
+
+The syntax of LTL in Figure 7 includes primitive propositions P with the 
+usual propositional connectives, and three temporal operators. Bandera distin- 
+guishes logical connectives (e.g., A, V) in the specification logic from logical 
+
+
+
+
+(m n) 
+
+
+(init) 
+
+
+init: result := 1; 
+
+[init , 1] 
+
+goto test; 
+
+[init .2] 
+
+test: if <(n, 1) then end else loop; 
+
+[test . 1] 
+
+loop: result : = * (result, m) ; 
+
+[loop. 1] 
+
+n -(n, 1) ; 
+
+[loop. 2] 
+
+goto test; 
+
+[loop .3] 
+
+end: return; 
+
+[end . 1] 
+
+Fig. 6. Power FCL 
+
+program 
+
+
+Syntax Domains 
+
+
+-0 € Formulas [17] 
+
+P 6 Propositions^] 
+
+e 6 Expressions [E] 
+
+Grammar 
+
+rp "= P 1 -P 1 
+
+ipi A rp2 | ipi V V>2 | 
+Hip | Oip | tpi U 
+
+P ::= [n] | e 
+
+Fig. 7. Syntax of the FCL property language for a signature E 
+
+
+program operations, and it automatically transforms property specifications to 
+Negation Normal Form (NNF) [17] to simplify the property abstraction process. 
+Accordingly, the syntax of Figure 7 only generates formulas in NNF, and we will 
+assume but not encode explicitly the fact that expressions e in propositions do 
+not contain logical operators. 
+
+When specifying properties of software systems, one typically uses LTL for- 
+mulas to reason about execution of particular program points ( e.g ., entering or 
+exiting a procedure) as well as values of particular program variables. To capture 
+the essence of this for FCL, we use the following primitive propositions. 
+
+- Intuitively, [n] holds when execution reaches the statement with unique iden- 
+tifier n (i.e., the statement at node n will be executed next). We call propo- 
+sitions of this form node propositions . 
+
+- Intuitively, e holds when the evaluation of e at the current node is not false. 
+
+For example, a program requirement that says if m is odd initially, then when 
+the program terminates result is odd, can be written as 
+
+0[end\ U([init] A =(%(m, 2),1) =$■ 0([endj A =(%(result, 2), 1))). 
+
+
+
+
+
+
+Converting the property to NNF yields 
+
+□-< [end] V 0(-\init] V -i=(%(m, 2), 1) V 0([end] A =(%(result, 2), 1))). 
+
+This particular property is an instance of a global response property [11] un- 
+der the assumption[26] that the program eventually terminates (i.e., reach end). 
+We need the assumption to work with since our abstractions cannot preserve 
+liveness property. That is, an abstracted program may violate some liveness 
+properties even though the the original program does not. This is due to the im- 
+precision introduced in our abstraction process, for example, when an abstracted 
+loop condition cannot be decided this gives rise to infinite traces in the program 
+that may violate the liveness property. 
+
+Given an LTL formula xp where V is the of set of primitive propositions 
+appearing in xp, we will write NodesfP] for the set of CFG nodes mentioned in 
+node propositions in V , and VarsfP] for the set of variables mentioned in variable 
+propositions in V. 
+
+3.3 Program and Property Semantics 
+
+Program semantics Figure 8 presents the semantics of FCL programs. The 
+interpretation of a 17-program p is parameterized on a Z-aigebra A. Given a 
+E, A , and a type-assignment F mapping i7-program variables to i7-types, a 
+store cr is (17, A, T) -compatible when domain(a) = domain(F) and for all x € 
+domain(r) . a(x) € [P(x)|. The set of (E, A, /"^-compatible stores is denoted 
+[T]£. The semantics of a program is expressed via transitions on program states 
+(n, cr) where n is a CFG node identifier from p and a is a (17, A, /^-compatible 
+store. A series of transitions gives an execution trace through p’s statement- 
+level control flow graph. It is important to note that when execution is in state 
+( rii,cri ), the code at node n* has not yet been executed. Intuitively, the code at 
+m is executed on the transition from (n*, <7*) to successor state (ni+i,cr i+1 ). 
+
+Figure 8 gives a simple operational semantics that formalizes the transition 
+relation on states. In contrast to the small-step formalization of transition re- 
+lation, a big-step semantics is used to formalize expression evaluation since we 
+consider expression evaluation to be atomic. The top of the figure gives the defi- 
+nition of expression, assignment, and jump evaluation. The intuition behind the 
+rules for these constructs is as follows. 
+
+— cr h expr e => v means that under store cr, expression e evaluates to value v. 
+
+— cr a => cr' means that under store cr, the assignment a yields the 
+
+updated store <t'. 
+
+“ & b jump j => l means that under the store a, jump j will cause a transition 
+to the block labeled L 
+
+The three transition rules describe small-step transitions caused by assignment 
+evaluation, jump evaluation leading to a new block, and jump evaluation leading 
+to termination. We assume that the set of node labels Nodes[FCL] used in the 
+semantics contains a distinguished node halt which we use to indicate a terminal 
+state. 
+
+
+
+Expressions and Assignments 
+v e Mi 
+
+0^expr e => V (v,v') € [[t 
+
+CT h expr C => V <7 h expr X => Cr(x) 
+
+0 l-expr [rCrrJe => v' 
+
+<rKipr e< =*■ Vi Mi(v i,V2,v) 
+
+0 f * expr ei => Vi [t]z(vi,V 2 ,v) 
+
+0 h eX pr o(e 1 , 62 ) V 
+
+0 h expr t(e l,e 2 ) v 
+
+cr h cxpr e V 
+
+
+0 ^assign X l— t ^ a[x »-> v] 
+
+Jumps 
+
+0 h assign skip ^r” (7 
+
+0 h jump goto l l 
+
+0 h jump return => halt 
+
+0 h expr £ 
+
+=J> true 
+
+cr hjuTnp if e then h else I 2 => l\ 
+
+0 1 “ expr e 
+
+=> false 
+
+0 I" jump if e then h else I 2 => h 
+Transitions - 1 _ . _ . / 
+
+0 1 a-ssi^n a a j / \ 
+
+(n, <r) i — >■ (n',a') 1 C ? e ( n ) ~ a 
+
+where n = succyn) 
+
+0 jump j — ^ 1 
+
+(n,o-) i — >■ (n',cr) 
+
+if code(n) = j 
+
+where n = first(l) 
+
+0 h jump j h 3 ft 
+
+(n, cr) i — y (halt, a) 
+
+Semantic Values 
+
+if code(n) = j 
+
+n € Nodes [FCL] 
+
+s € Statcs[FCL] = Nodes[FCL] x Stores[FCL] 
+
+Fig. 8 . Operational semantics of a I7-FCL program with respect to X’-algebra A 
+
+
+Property semantics The semantics of a primitive proposition is defined with 
+respect to states. 
+
+
+[MJr (»><*) = 
+bMl iKcQ = 
+
+M z(n,cr) = 
+[-.e]£(n,<7) = 
+
+
+{true} if m = n 
+{false} otherwise 
+
+{true} if m ^ n 
+^false}otherwi s e - 
+
+{true} if a h expr e false 
+{false} otherwise 
+
+{true} if a h expr e f=^ true 
+{false} otherwise 
+
+
+
+
+Note that the semantics of expression propositions defines an under-approximation, 
+i.e., the proposition expression is not considered true if the expression evaluates 
+to {true, false}. 
+
+The semantics of an LTL formula is defined with respect to traces, where 
+each trace is a (possibly infinite) non-empty sequence of states written 77 = 
+
+$i , $2 , ■ * •• We write 77* for the suffix starting at S{, i.e., 77* = Si, Si+ i, — 
+Thus, an execution trace of p is a state sequence 77 = s x , s 2 , ... with the 
+following constraints: si is an initial state for p and S{ i — ► 
+
+The temporal operator □ requires that its argument be true from the current 
+state onward, the O operator requires that its argument become true at some 
+point in the future, and the U operator requires that its first argument is true 
+up to the point where the second argument becomes true. We refer the reader 
+to, e.g., [17], for a formal definition of the semantics of LTL. 
+
+4 Defining Abstractions 
+
+Section 2.1 noted that each Bandera abstraction is associated wdth a concrete 
+type r and that each abstraction definition has four components: an abstrac- 
+"tion’name, an abstract domain, an -abstraction* function/ relation , and abstract 
+versions of each concrete operation and test. Accordingly, if r is a type from 
+E, an [E, A]-compatible r-abstraction a is a structure containing an abstrac- 
+tion type identifier r a , a finite abstraction domain [r a J, an abstraction rela- 
+tion ^ a C [t]£ x [r a ], for each r operation symbol o in E an operation 
+[o a J C jr a ] x [r a J x {r a J, and for each r test symbol t in E a test [o a J C 
+[t 0 ] x [t 0 ] x |BoolJ. 
+
+To ensure that properties that hold true for the abstracted system also hold 
+true in the original concrete system, one needs the standard notion of safety 
+(denoted <j) as a simulation between operation/test relations. 
+
+Definition 1. (Safe abstract operations and abstract tests) 
+
+Let r a be a r-abstraction. 
+
+- [o] <3 [o a ] iff for every a, c 2l c € [r], anda u a 2 G [r a ], if a a x , c 2 
+
+a 2 , and [o](ci ? c 2 ,c) then there exists a € [r a ] such that [o a ](ai , a 2 , a) and 
+
+c a? 
+
+- w < [t tt ] iff for every c lf c 2 € [rj, a x ,a 2 £ [rj, and b € [BoolJ, if c x a i; 
+
+c 2 a 2 , and [t] (c x , c 2 , 6) , then [t a ](ai, a 2 , b) . 
+
+As noted in Section 2.1, when defining an abstract type r a for integers in 
+Bandera, the user only needs to use BASL to specify its abstraction domain 
+[r a J and its abstraction relation Safe operations and tests involving the 
+new abstract type are generated by Bandera automatically using a calculation 
+similar in style to those used to calculate weakest-preconditions in predicate 
+abstraction. 
+
+For example, suppose that the user wants to define a new integer abstrac- 
+tion T S i gns . The user then can define the abstraction domain as [ r s i gns ] = 
+
+
+
+{neg, zer o,pos} . In writing the abstraction function, the user would write sim- 
+ple predicates to create a covering of the integer domain (e.g., as shown for the 
+Even Odd BASL definition in Figure 2). In our formal notation, we capture this 
+using the following predicates for each of the abstract tokens in the r s i gns do- 
+main: neg? = Xx.x < 0,zero? = Xx.x = 0, and pos? = Xx.x > 0. Given these 
+predicates, we can define the associated abstraction relation s i gns as 
+
+Vx £ [Int] . Va € lr signs J . x signs a iff a?(x). 
+
+Given these definitions, Bandera automatically constructs a safe definition for 
+each abstract operation and test essentially by (a) beginning with a worst case 
+assumption that the relation defining the abstract operation is total (note that 
+this is a safe definition since a total relation covers all possible behaviors of the 
+concrete system), and then (b) calling the decision procedures of PVS to see if 
+individual tuples in the relation can be eliminated. 
+
+For example, consider how the definition of would be derived. Since 
+
+the abstract domain | [r s i gns \ contains 3 abstract tokens, we would initially have 
+27 tuples in the total relation associated with [+,i P n*]. Now, for each tuple 
+(ai, a 2 ,a) £ [-f 5 t 5 ns], Bandera would construct a purported theorem in the input 
+syntax of PVS which we re prese nt as follows 
+
+Vni,n 2 £ [Int] . ai?(ni) A a 2 ?(n 2 ) => ->a?([+](ni, n 2 )). 
+
+If PVS can prove the fact above, then the tuple (ai , a 2 , a) can safely be eliminated 
+relation defining 1+*^™] because, since the theorem is true, a is never needed 
+to simulate the result of adding n\ and n 2 . 
+
+Specifically, consider the three tuples (pos, pos, neg) , (pos, pos, zero), and 
+(pos, pos, pos). The decision procedure is able prove the two theorems 
+
+Vni, n 2 £ [Int] . pos?(n 1 ) A pos?(n 2 ) => -' / neg?(l+](n 1 ,n 2 )), 
+
+Vni,n 2 £ [Int] . pos?(ni) A po$?(n 2 ) => -izcrt>?([+j(n lj n 2 )), 
+
+but it fails to prove 
+
+Vni,n 2 £ [Int] . pos?(ni) A pos?(n 2 ) -^pos?([+](n 1 ,n 2 )), 
+
+so Bandera would remove the first two tuples from the relation and have 
+[+ S i ff ns](p0s,pos) = {P os } (depicting the relation as a set- valued function). 
+
+In summary, the definitions for abstract operations and tests for integer ab- 
+stractions is as follows. 
+
+Definition 2. Let r a be an integer abstraction . 
+
+- For all a\,a 2 , a £ [r a ], [o a ](ai, a 2 , a) iff the decision procedure fails to decide 
+
+VnTrn^£~flnt]va^^ 
+
+- For all ai ,a 2 £ [r a ] and b £ [Bool], [t a ](ai,a 2 ,&) ? iff the decision procedure 
+fails to decide 
+
+Vni,n 2 .ai?(ni) A a 2 ?(n 2 ) b ^ lt](ni,n 2 ). 
+
+
+This technique can also be used to infer coercions between two integer ab- 
+stractions a and a'. Specifically, (a, a') € [[r a «r a /j] if the decision procedure 
+fails to decide Vn.a?(n) =4* 
+
+5 Attaching Abstractions 
+
+Bandera’s process for transforming concrete programs to abstract programs re- 
+quires that each variable and each occurrence of a constant, operation, and test 
+in the concrete program be bound to an abstraction type; these bindings indicate 
+to the program transformer which versions of abstract program elements should 
+be used in place of a particular concrete element (e.g., which abstract version of 
+the + operation should be used in place of a particular concrete instance of +). 
+Requiring the user to specify all of this binding information directly would put 
+a tremendous burden on the user. 
+
+To construct the desired binding information while at the same time keeping 
+user effort to a minimum, Bandera provides an abstract type inference facility. 
+A user begins the type inference phase by selecting abstractions from the ab- 
+straction library for a small number of program variables that the user deems 
+relevant. Bandera provides a default seFof coeraon^between library abstractions 
+for each concrete type that the user can override if desired. For example, for any 
+Int abstraction r a a coercion relation [[lnt«:r a ]] is automatically introduced 
+by taking [[Int^T^]] = (i.e., the coercion is just the abstraction func- 
+
+tion) and a coercion relation f[r a <C Point]] is automatically introduced where 
+l[r a Point]] simply maps all elements of [r a ] to the single element of the Point 
+domain. The default coercion definitions plus any user-defined coercions give rise 
+to a subtyping structure for each concrete type. This abstraction selection and 
+subtyping/coercion information forms the input to the type inference compo- 
+nent. In the Bandera methodology, boolean variables are never abstracted since 
+they already have a small domain. We will model this in the definitions below by 
+abstracting all boolean variables with an identity abstraction which has the effect 
+of leaving boolean variables and values unchanged by the abstraction process. 
+
+Given the program, initial abstraction selection, and subtyping information, 
+type inference proceeds in two steps. 
+
+1. Abstract types are propagated along value flows to determine abstraction 
+bindings for as many constructs as possible. If there are any abstract type 
+conflicts during this process, type inference is halted and the user is presented 
+with an error message. 
+
+2. Some variables and constructs may not be assigned abstract types in the first 
+step because they are independent of the variables in the initial abstraction 
+selection. Abstractions for independent variables/constructs are determined 
+according to default abstractions specified by the user. The most commonly 
+used defaults are (a) to abstract all independent variables/constructs with 
+the point abstraction which has the effect of discarding all information about 
+values manipulated by these constructs, or (b) to abstract these constructs 
+
+
+Annotated Program 
+
+Abstracted Program 
+
+On n) 
+
+On n) 
+
+(init) 
+
+(init) 
+
+init: result := l 1 ; 
+
+init: result :- odd; 
+
+goto test; 
+
+goto test; 
+
+test: if (<(n 2 ,l 3 )) 4 
+
+test if <(n, 1) 
+
+then end else loop; 
+
+then end else loop; 
+
+loop: result := (*(result 5 ,ni 6 )) 7 ; 
+
+loop: result : - * eo (result , ra) ; 
+
+n := (-(n 8 ,l 9 )) 10 ; 
+
+^5 
+
+i 
+
+n 
+
+l=S 
+
+goto test; 
+
+goto test; 
+
+end : return ; 
+
+end: return; 
+
+Fig. 9. Annotated and abstracted versions of the FCL power program 
+
+
+with the identity abstraction which has the effect of preserving all informa- 
+tion about the values manipulated by these constructs. 
+
+As an example, consider the power program and the LTL formula from Sec- 
+tion 3.2. Following the methodology for selecting abstractions in Section 2.1, the 
+EvenOdd abstraction would be appropriate for the variable m of the power pro- 
+gram in Figure 6. Intuitively, an abstraction is appropriate for a property when 
+it is precise enough to decide all propositions appearing in the property. 
+
+Suppose that the abstraction library that is used contains the concrete (iden- 
+tity) Int, EvenOdd, Signs, and Point abstractions for integer types. The subtyping 
+relation between abstractions must always form a lattice; the default subtyping 
+relation has Int as the least element, Point as the greatest element, with the 
+remaining abstractions being unrelated to each other. This lattice is augmented 
+with an additional element _L which ends up being bound to variables /constructs 
+whose type is unconstrained due to the fact that they are independent of the 
+initial abstraction selection. The second phase of the type inference process de- 
+scribed above involves replacing _L with one of the default options for uncon- 
+strained types. We write C to denoted the augmented subtyping ordering used 
+in the type inference process. Intuitively, if T\ C t 2 , then ti is at least as precise 
+as r 2 . 
+
+To represent the binding between program constructs and abstractions, w e 
+will assume that each expression abstract syntax tree node is annotated with 
+an unique label as in the left side of Figure 9. Bindings are then captured by a 
+cache structure C which maps variables, labeled AST nodes, and operator/test 
+instances to types in the augmented subtyping lattice. Following convention, 
+type inference is phrased as a constraint-solving problem in which constraints 
+
+
+
+
+Syntax Domain Extension 
+
+l € Exp-Labels [FCL] 
+f € Terms[FCL] 
+
+Grammar with Labeled Expression Extension 
+
+e P t c j x | o(ei,e 2 ) f t(e i,e 2 ) 
+
+Constraints (Excerpts) 
+
+(C, TZ) {= c‘ iff A-CC(l) 
+
+(C, TZ) f= x‘ _ iff C(x) = C(l) and xTZl 
+
+(C, TZ) h (o(# , ft 2 ))' iff (C, TZ) f= ft 1 and {C, TZ) |= # 
+
+and C(fi)_C C(o, I) and C(h) C C(o, J) 
+and C(o, l) = C(I) _ 
+and l\lZ(o, f) and l 2 lZ(o, l) 
+and (o, 1)1ZI 
+
+(C, 1Z) (= x := ? iff C(J) C C(x) and llZx 
+Data Structures 
+
+.(graph nodes) Jsf. = Yariahles[FCLj U Exp-J^abek[FCL] JJ 
+
+((Operations[FCL] U Tests[FCL]) x Exp-Labels[FCL]) 
+(cache) C = Af-* Types {E a \±. 
+
+(dependencies) 1Z C Af x Af 
+
+Fig. 10. Type Inference 
+
+
+on cache entries are generated in a syntax-directed traversal of the program and 
+then solved using a union-find data structure. 
+
+
+5.1 Type Inference: Generating Constraints 
+
+Figure 10 presents the specification of constraint generation in the style of [23]. 
+The data structures used include a type dependency graph with nodes Af that 
+are either variables, labels of AST nodes, or operation/test occurrences which 
+are identified by a pair consisting of the operation/test symbol and a label for the 
+node in which the operation/ test instance occurs. As described above, a cache 
+C maps each graph node to a type from the augmented lattice Types[J£ a ]jL* 
+The relation 7 Z maintains dependency information associated with value flows. 
+This information is used in the second phase of type inference (described above) 
+where constructs tfiat are independenTbf^ bindings are assigned" 
+
+types. Due to the manner in which constraints are constructed, xlZy implies 
+C{x)QC{y). 
+
+Constraints on C and 1Z are generated in a syntax-directed manner according 
+to the following intuition. 
+
+
+
+
+- There are no constraints on constants except those imposed by the context 
+(which are captured by other rules). Thus, the type assigned to a constant 
+can be any value in the lattice at or above X. 
+
+- A variable reference expression (which yields the value of variable) should 
+have the same type as the variable itself, and xTZl captures the fact that the 
+type of x must be at least as precise as that of L 
+
+- The abstraction associated with the arguments of an operator application 
+must lie at or below the abstraction associated with the operator itself. Note 
+that this will allow the type of an argument to be coerced to the type of the 
+operator. 
+
+- The abstraction associated with the right-hand side of an assignment must 
+lie at or below the abstraction associated with the variable being assigned. 
+Note that this will allow the type of the right-hand side to be coerced to the 
+type of the left-hand side. 
+
+In addition to the constraints generated from the rules above, for every vari- 
+able x appearing in the user’s initial abstraction selection, a constraint C(x) = r x 
+is added where r x is the abstraction type chosen for x. For each remaining vari- 
+able y, a constraint X C C(y) is added. 
+
+Generating the le ast so lution for a system of constraints yields abstraction 
+bindings that are as precise as possible (with respect to the subtyping rules) . In 
+particular, the ability to use coercions at operation/test arguments, etc. avoids 
+having argument abstractions determined by the context (i.e., having to receive 
+the same type as the operation), and thus allows abstraction assignments at such 
+positions to be as precise as possible. 
+
+For the power program example on the left in Figure 9, the following con- 
+straints are generated (ignoring 1Z for now). 
+
+6 ( 1) = X 6 ( 1) C C (result) C( n) = C( 2 ) 6 ( 2) C C(<, 4) 
+
+6 ( 3) = X C( 3) C 6(<, 4) C(<, 4) = C( 4) C (result) = 6( 5) 
+
+C{ 5) C C( *, 7) C( m) = 6 ( 6 ) 6 ( 6 ) C C(*, 7) C ( *, 7) = C{7) 
+
+C( 7) C C (result) C( n) = C(8) C( 8) C C(-, 10) C( 9) = 1 
+
+6 ( 9 ) C C(-, 10) C(-, 10) = C(10) C(10) C C(n) 
+
+Given a user selection of Even Odd for m, the following additional constraints 
+are generated. 
+
+C(m) = EvenOdd and ± C C(n) and ± C C (result) 
+
+5.2 Type Inference: Solving Constraints 
+
+Once constraints are generated as described above, Bandera finds the least solu- 
+tion with respect to C. For example, the least solution for the constraints from 
+the-pewer-example-is-as-follows. 
+
+C( m) = EvenOdd C(n) = ± C (result) = EvenOdd (5(1) = _L 
+
+6 ( 2 ) = X 6 ( 3 ) = X C(4) = X C(5) = EvenOdd 
+
+C(6) = EvenOdd 6 ( 7 ) = EvenOdd 6(8) = X 6 ( 9 ) = X 
+
+C(10) = X C(<,4) = X C>,7) = EvenOdd C(— , 10) = X 
+
+
+As illustrated by the presence of _L in some of the bindings above, this step 
+may leave the type of some variables/ AST-nodes unconstrained. In general, _L- 
+bindings such as those shown above actually fall into two categories. 
+
+The first category contains variables/ AST-nodes that produce values that can 
+flow into a context that is constrained. For example, this is the case with the AST 
+node labeled 1: the constant 1 flows into the variable result (which is bound 
+to EvenOdd) as a consequence of the assignment. Thus, to obtain an abstraction 
+assignment that is precise as possible (i.e., one that does not “bump up” the 
+abstraction assigned to result to a higher value in the lattice of abstractions), 
+the abstraction chosen for such nodes should not be greater than that of any 
+constrained context into which the values produced by such nodes can flow. The 
+dependency information provided by the 7 Z structure is used to determine if 
+a unconstrained node falls into this category (i.e., if a constrained context be 
+reached by following the dependency arcs of 1Z ). 
+
+The second category contains variables/ AST-nodes that produce values that 
+do not flow into constrained contexts. There are several reasonable views as to 
+what the abstraction bindings should be for items in this category. One view 
+is that one should generate models that are as abstract as possible in order to 
+reduce the size of the state space as-much-as possible. Following this view, one 
+might bind the Point abstraction to each item in this category. On the other hand, 
+this could result in such an over-approximation that infeasible counter-examples 
+are introduced. Thus, one might want to generate models that are as precise as 
+possible. Following this view, one might bind the Int abstraction to each item 
+in this category. Note that although such a choice might lead to an unbounded 
+state-space (since integers are left unabstracted in the program), this is still quite 
+useful in practice since model-checkers such as Spin allow arbitrary integer values 
+with bounds imposed only by the number of bits used in the storage class (e.g., 
+byte, int, etc.). Bandera actually provides a flexible mechanism for declaring 
+upper and lower-bounds on individual integer variables. 
+
+In any case, the two categories above are currently treated as follows in 
+Bandera. For the first category, Bandera binds items to the concrete Int abstrac- 
+tion. This always satisfies the constraints since Int is the least element in the 
+non-augmented abstraction lattice, and it follows the heuristic of keeping ab- 
+stractions as precise as possible. At the point where concrete integers flow into 
+abstracted contexts, an appropriate coercion will be introduced in the model. 
+Since items in the second category are completely unconstrained, Bandera al- 
+lows the user to select a default abstraction Tdef (typically, Int or Point) for these 
+items. 
+
+Capturing this in our formal notation, Bandera proceeds by building a new 
+^'-ffonHT-as-follows. 
+
+
+C'(x) = 
+
+
+C(x), if C( x) ^ -L 
+Int, if 
+
+
+
+That is, already assigned an abstraction keep the same abstraction in C f , items 
+from the first category above get assigned Int, and items from the second category 
+get assigned the chosen default abstraction. In the example program, this results 
+in the following final bindings. 
+
+
+C(m) = Even Odd 
+
+C( 2) = Tdef 
+
+6(6 ) = EvenOdd 
+C(10) = r d ef 
+
+
+C( n) = r de f 
+C(3) = T de f 
+6(7) = EvenOdd 
+C(<, 4) — r de f 
+
+
+C(result) = EvenOdd 
+
+6( 4) = Tdef 
+
+6 (8) = Tdef 
+
+C(*,7) = EvenOdd 
+
+
+6(1) = Int 
+C(5) = EvenOdd 
+6(9) — Tdef 
+C(- 10) =T def 
+
+
+As a future improvement to the treatment of items from the first category 
+(where C('JZ*(x)) ^ { J_}), it may be desirable to give user the flexibility to replace 
+Int with any less precise abstraction t that still lies at or below the abstraction 
+of any context that an item’s value may flow into, i.e., 
+
+T n n{6'( y ) | v e n*(x) and C'( y ) £ jl}. 
+
+
+From a usability standpoint, it is important to note that the type inference 
+algorithm outlined above is efficient and scales well, and that the process of se- 
+—leet-ing-abstractions and- visualizing type -inference-resultsTs interactive. -Thus, 
+the user can experiment with the abstraction selection with ease, e.g., by in- 
+crementally adding the abstraction selections and visualizing the effects of each 
+selection. 
+
+Bandera provides feedback to the user if the abstraction selection is inconsis- 
+tent. For example, suppose that the user selects m as EvenOdd abstraction and 
+result as Signs abstraction. A conflict arises because of the following constraints 
+cannot be satisfied. 
+
+C( m) = EvenOdd C(result) = Signs C(result) — C(5) 6(5) C C(*,7) 
+
+C(m) = 6(6) 6(6) C 6(*, 7) C(*, 7) = 6(7) 6(7) C C( result) 
+
+
+6 Generating Abstract Programs 
+
+Once abstract type inference has been carried on a i7-program interpreted with 
+A, the set of (A7, A]-compatibIe abstractions {ai, ..., a n } chosen by the user 
+and the final abstraction bindings from the type inference process are used to 
+induce an abstract program based on a new signature and algebra [X' a ,A CK ] 
+that combines the selected abstractions. Section 2.2 noted that this process is 
+implemented in Bandera by replacing primitive concrete Java operations in the 
+program to be abstracted with calls to Java methods in abstraction library classes 
+that implement semantics a ssociated with abstract versions of operations. 
+
+We first formalize the notion of these library classes/methods by reifying 
+the abstraction semantics from Section 4 into constants and symbols to be used 
+in the signature for the abstract program. Specifically, given a r- abstraction a, 
+we form a new type named by a’s abstraction type identifier r a . For this type, 
+constants, operation symbols, and test symbols, are constructed as follows. 
+
+
+- Cons[r a ] = {a j a € [r a J}. That is, r a constants are formed by introducing 
+a fresh symbol a for each element of the abstract domain. This corresponds 
+to the use of constants such as EvenOdd.Even in abstracted Java programs 
+(see Section 2.2). 
+
+- Ops[r a ] = {o a | o € Ops[r]}. That is, r a operation symbols are formed by 
+introducing a fresh symbol o a for each operation symbol associated with the 
+17-type r being abstracted. This corresponds to the use of method calls such 
+as EvenOdd.add (see Section 2.2). 
+
+- Tests[r a ] = {t a | t e Ops[r]}. That is, r a test symbols are formed by 
+introducing a fresh symbol t a for each test symbol associated with the 17- 
+type r being abstracted. 
+
+With these syntactic elements in hand, we now form a signature to be used for 
+the abstracted program by combining the symbols introduced above. Given user- 
+selected abstractions {ai, ..., a^} along with default and user declared coercions, 
+a new signature XJ a representing this combination of abstractions is constructed 
+as follows. 
+
+- Types[I7 a ] = {r ai , ..., r an } where r a . is the type identifier corresponding to 
+each abstraction a*. 
+
+- aps[r a ] = □ ie{ i > ..., n} Ops[Qj], 
+
+- Tests[r a ] = Ui € {i,...,n} Tests M- 
+
+- = { (t\ , 7 * 2 ) | a coercion exists from T\ and 7 * 2 }. 
+
+An appropriate abstract I7 a -algebra is now formed in a straightforward man- 
+ner as follows. 
+
+- For all types r a € X 7 a , — [r a ] (i.e., the domain specified in the a 
+
+abstraction). 
+
+- For all o a € Ops[i7 a ] where o a is a r a operation, [o a ]zl = | [o a J (i-e., the 
+operation interpretation specified in the a- abstraction). 
+
+- For all t a 6 Tests[I7 a ] where t a is a r a test, [*<*]£* = (1-^., the test 
+
+interpretation specified in the a-abstraction) . 
+
+- For each coercion symbol [n C r 2 ], the corresponding coercion relation is 
+defined for default coercions as explained earlier or defined by the user. 
+
+Figure 11 presents rules that formalize the translation of concrete programs 
+to abstract programs. The rules are guided by bindings of labeled AST nodes to 
+abstract types as captured by the cache <7. 
+
+The first group of rules in Figure 11 have the form h c e a ^d describe 
+how constants of type source r may be transformed (or coerced) to abstract 
+constants of target type r a . If there is no difference between the source and 
+target types, then the transformation is the identity transformation. If there is 
+a single abstract constant associated with a concrete integer constant then the” 
+transformation yields that abstract constant. Otherwise, a coercion expression is 
+introduced to carry out the transformation during model-checking. Recall that 
+boolean program elements are never abstracted, so the presented rules cover all 
+possible cases for boolean constants. 
+
+
+
+Constant Coercion 
+
+
+
+The second group of rules in Figure 11 have the form C \~ P e a and 
+are similar in spirit to the rules above. If there is no difference between the 
+source and target types, the result of the transformation is simply the result 
+of recursive transforming the labeled term ?. If a constant is being coerced, 
+the constant coercion rules are used. On non-constant terms where the source 
+type is different from the target type, a coercion is inserted after recursively 
+transforming the argument of the translation. 
+
+The third group of rules in Figure 11 have the form C h ? =>■ e a . The 
+constant coercion rules are used to transform a constant from its concrete type 
+to a possibly abstract type. In the rules for operations and tests, the expres- 
+sion coercion rules are used to transform and possibly coerce the arguments. 
+Then, the concrete operation is replaced by the abstract version indicated by 
+the corresponding cache entry. 
+
+The remaining rules which are not displayed in Figure 11 are straightforward 
+— remaining constructs such as conditions, returns, and got os are preserved 
+while transforming all subexpressions. 
+
+The rules of Figure 11 generate a syntactically correct abstract program (the 
+proposition below captures this for express ions) . 
+
+Proposition 1 (Syntactically correct abstract expressions). 
+
+Let r Kc e : r and C h ? ^ e a where C is compatible with F , P is the labeled 
+version of e. Then F a \-£ a e a : C(t) where domain(r a ) = domain(F) and 
+Vx € domain(r a ) . r a (x) = C(x). 
+
+
+
+Applying the translation rules of Figure 11 to the power program in Figure 6 
+with context C' from Section 5 gives an abstracted power program shown on the 
+right in Figure 9. 
+
+In the definitions that follow, when F a arises from r due to the program ab- 
+straction process captured in the proposition above, we say that r a is a abstract 
+version of jF. 
+
+We now consider some basic safety properties that we need to express the 
+correctness of abstraction. If E a and A a represent the abstract signature and 
+algebra generated from a basis E and A, and r a is an abstract version of jF 
+built using a set a of abstractions, the safety relation between a /^-compatible 
+store <j and a F a -compatible store <j a (denoted cr < </) holds iff for all x E 
+domain(F) . a(x) ~^>r a (x) &a(x)j i.e., the store values for each x are related by 
+the abstraction relation associated with x’s abstract type. 
+
+Lemma 1. (Safety for expressions) Let TV's e : r and let T a \~n a e a : r a be 
+the abstract expression constructed by the type inference and program abstraction 
+process described above. Let a E [T]^., o a E [F a ]£*, v E [r], and b E [Boot]; 
+
+- a <J cr a and o b e => v implies 3v a € [r a ] such that cr a h e a => v a and 
+
+- -Va. 
+
+- cr < cr a and a b e => b implies cr a h e a => b 
+
+Lemma 2. (Safety for transitions) Let E a and A a represent the abstract sig- 
+nature and algebra generated from a basis E and A , and let r a be an abstract 
+version of F built using a set a of abstractions , then for every cr , o ' € [T]^, and 
+for every cr a € [-Fa]x£, an ^ n ? n/ € Nodes[FCL], a < o a and (n,cr) i — y (n f ,cr f ) 
+implies 3<7 l a E [F a ]^“ such that (n,cr a ) i — > (n',cr^) and cr f < o l a . 
+
+Given these basic properties, the fact that a concrete program is simulated 
+by its abstracted counterpart is established in a straightforward manner. 
+
+7 Generating Abstract Properties 
+
+When abstracting properties, we want to ensure that if an abstracted property 
+holds for an abstracted program, then the original property holds for the original 
+program. In order to achieve this goal, properties have to be under-approximated. 
+This is the dual of the process of abstracting a program. A program is abstracted 
+by over-approximating its behaviors, i.e., the abstracted program may contain 
+more behaviors that are not present in the original program due to the impre- 
+cision introduced in the abstraction process. Thus, if the abstracted program 
+satisfies a particular requirement, then we can safely conclude that the original 
+"program satisfies th^lr^quirement W'h^n’lSstra^mg^'a property, "however , the ~ 
+abstraction may introduce imprecision such that the abstracted property may 
+allow more behaviors of the program that satisfies it. Thus, we only consider the 
+cases where the abstracted property can precisely decide the original property, 
+i.e., under-approximating it. 
+
+
+
+Property abstraction begins in Bandera by performing type-inference on and 
+abstracting each expression e in the property where property expressions are 
+constructing following the grammar in Figure 7. Let e be a property expression 
+such that r h e : Bool and domain(r) = VariablesjeJ where Variables [e] 
+denotes the set of variables occurring in e. Furthermore, assume that r a is an 
+abstract version of r and that e a is an abstract version of e (i.e., as generated 
+by the transformation process described in the previous section where we have 
+T fl h e a : Bool). 
+
+Section 3.3 defined the semantics of expression propositions as an under- 
+approximation (i.e., an expression is only considered to be true when it does not 
+evaluate to false). Bandera represents this semantics by constructing explicitly 
+a disjunctive normal form that encodes the cases of stored values that cause an 
+expression proposition to be interpreted as true. 
+
+For an abstract property expression e a such that r a H e a : Bool, we denote 
+the set of /^-compatible stores that make e a true as 
+
+TrueStores[r a ](e a ) d = {cr a | a a € [r a ] and3n.[e a ](n 7 cr a )}. 
+
+Note that the semantics of expression propositions is independent of control 
+points rc. 
+
+Next, we denote a conjunction that specifies the bindings of a store o a as 
+Bindings(cr a ) = f f\{=(x,a) \ (x,a) € a a }. 
+
+The following function T specifies the transformation that Bandera uses to 
+generate abstracted properties (the transformation is structure preserving except 
+for the case of proposition expressions which we give below). 
+
+T(e a ) — \J {Bindings{<j a ) | a a € TrueStores[r a ](e a )} 
+
+T(-*e a ) = \J {Bindings{a a ) \ cr a £ TrueStores[r a ](~>e a )} 
+
+For example, suppose that we want to abstract the property 
+
+□-»[end] V □(-• [init] V -i=(%(m, 2), 1) V O ([end] A =(%(result, 2), 1))). 
+
+with m and result abstracted using the evenodd abstraction. After applying T, 
+the property becomes 
+
+□-i [end\ V □ (^[init] V =(m .even) V 0{[end\ A =(result, odd))). 
+
+This is the case where the abstraction is precise enough to decide the original 
+.property, 
+
+However, suppose that now m is abstracted using the evenodd abstraction, 
+and result is abstracted using the point abstraction. After applying T, the 
+property becomes 
+
+C\~^[end\ V □(-« [init] V =(m, even) V 0([end\ A false)). 
+
+
+
+This is the case where an abstraction is not precise enough to decide a proposi- 
+tion, i.e., =(%(result, 2), 1) is under- approximated to false , because point is not 
+precise enough. When submitted to a model checker, infeasible counter-examples 
+would be generated as evidence of the imprecision. Various proofs of property 
+under-approximation can be found in [25]. 
+
+8 Related Work 
+
+There is a wide body of literature on abstract interpretation. In our discussions 
+of related work, we confine ourselves to work on automated abstraction facili- 
+ties dedicated to constructing abstract models suitable for model-checking from 
+program source code or closely related artifacts. 
+
+The closest work to ours is that of Gallardo, et. al. [12] on alpha SPIN 
+
+- a tool for applying data abstraction to systems described in Promela (the 
+input language of SPIN [15]). Alpha SPIN collects abstractions in libraries and 
+transforms both Promela models and properties following a strategy that is 
+similar to Bandera’s. Alpha SPIN does not include automated facilities such 
+as those found in Bandera for deriving sound abstractions, finding appropriate 
+program components to abstract using dependency information, nor automated 
+support for attaching abstractions via type-inference. 
+
+A closely related project that focuses on data abstraction of C program source 
+code is the work on the abC tool by Dams, Hesse, and Holzmann [7]. Rather than 
+providing a variety of abstractions in a library, abC focuses on variable hiding 
+
+- a conceptually simple and practically very useful form of data abstraction 
+in model checking which amounts to suppressing all information about a given 
+set of variables. abC uses an integrated demand-driven pointer analysis to deal 
+effectively with C pointers, and it has been implemented as an extension of 
+GCC. Functionality that is similar to what abC provides can be achieved using 
+Bandera’s slicing facility (which detects and removes irrelevant variables) and 
+Bandera’s Point abstraction. However, since abC is dedicated to variable hiding, 
+it provides a more precise form of abstraction attachment (e.g., compared to 
+Bandera’s type inference) for pointer types. 
+
+The Automated Software Engineering group at NASA Ames has developed 
+a flexible explicit-state model-checker Java Pathfinder (JPF) that works directly 
+on Java byte-code [3]. JPF includes a number of interesting search heuristics 
+that are proving effective in software model-checking. The Ames group has also 
+produced a simple predicate abstraction tool and a distributed version of the 
+model-checking engine. Due to the difficulties associated with dynamically cre- 
+ated data, the JPF predicate abstraction tool applies to integer variables only 
+and does not include support for automated refinement. In collaboration with 
+researchers at NXSTWAme?, JPF^has been incorporated _ as a back-end checker 
+for Bandera. 
+
+The Microsoft Research SLAM Project [1] focuses on checking sequential 
+C code using well-engineered predicate abstraction and abstraction refinement 
+tools. As discussed in Section 1, the strengths of the SLAM abstraction tool 
+
+
+
+compared to Bandera are its automated refinement techniques which can sig- 
+nificantly reduce the effort required by the user of the tool. The tradeoffs are 
+that such techniques are computationally more expensive than the “compiled 
+abstraction” approach taken by Bandera, and they have not been scaled up to 
+work with computational patterns often used in Java where programs iterate 
+over dynamically created data structure. 
+
+The BLAST Project [28], inspired by the SLAM work, combines the three- 
+steps of abstract-check-refine into a single phase. Like SLAM, BLAST also works 
+on sequential C code, and tradeoffs between the BLAST and Bandera abstraction 
+approach are the same as those between SLAM and Bandera. 
+
+Gerard Holzmann’s Feaver tool extracts Promela programs from annotated C 
+programs for checking with SPIN [15]. Feaver performs abstraction by consulting 
+a user built lookup-table that maps textual patterns appearing the the source 
+code to textual patterns that form pieces of the abstract program. This tool has 
+been used in several substantial production telecommunications applications. 
+
+Eran Yahav has developed a tool for checking safety properties of Java pro- 
+grams [30] built on top of Lev- Ami and Sagiv’s three-valued logic analysis tool 
+(TVLA) [21]. 
+
+
+9 Conclusion 
+
+
+We have given an overview of some of the technical issues associated Bandera’s 
+tools for constructing abstract models of Java software. These tools are based 
+on classical abstract interpretation techniques [6], and aim to provide users with 
+simple but effective mechanisms for generating tractable models suitable for 
+verification using widely-applied model-checking engines. Bandera’s abstraction 
+techniques have been used effectively in case studies with researchers at NASA 
+Ames involving checking properties of avionics systems. 
+
+The strength of the Bandera abstraction tools include their simplicity, their 
+ability to scale to large programs, and the ease with which they can be applied 
+to systems with dynamic allocation of data and threads. We believe the main 
+contribution of our work is the integration of different techniques into a coherent 
+program abstraction toolset that has the ability to greatly extend the range of 
+programs to which model checking techniques can be effectively applied. 
+
+Weaknesses of the tool include the lack of automated refinement techniques 
+and the lack of sophisticated heap abstractions. As noted earlier, work on projects 
+such as SLAM [1] and BLAST [28] have demonstrated the effectiveness of auto- 
+mated refinement techniques when applied to sequential programs that do not 
+manipulate dynamically created data. Scaling these techniques up to a language 
+like Java is an open problem that could a long way toward addressing the lack of 
+automated refinement techniques in Bandera. Sophisticated heap abstraction ca- 
+pabilities have been developed in work on shape analysis (e.g., the TVLA project 
+[21]), but automated abstraction selection and refinement techniques have not 
+be developed yet. Combining and scaling up the automated predicate abstrac- 
+
+
+tion refinement techniques and heap abstractions with automated refinement is 
+a research direction that we are pursuing. 
+
+
+References 
+
+1. T. Ball and S. Rajamani. Bebop: a symbolic mo del- checker for boolean programs. 
+In K. Havelund, editor, Proceedings of Seventh International SPIN Workshop , vol- 
+ume 1885 of Lecture Notes in Computer Science , pages 113-130. Springer-Verlag, 
+2000. 
+
+2. Saddek Bensalem, Yassine Lakhnech, and Sam Owre. Computing abstractions of 
+infinite state systems compositionally and automatically. In Proc , 10th Interna- 
+tional Conference on Computer Aided Verification , June 1998. 
+
+3. G. Brat, K. Havelund, S. Park, and W. Visser. Java PathFinder - a second gen- 
+eration of a Java model-checker. In Proceedings of the Workshop on Advances in 
+Verification , July 2000. 
+
+4. James C. Corbett, Matthew B. Dwyer, John HatclifF, Shawn Laubach, Corina S. 
+
+Pasareanu, Robby, and Hcngjun Zheng. Bandera : Extracting finite-state models 
+from Java source code. In Proceedings of the 22nd International Conference on 
+Software Engineering, June 2000. - -- ■ — 
+
+5. James C. Corbett, Matthew B. Dwyer, John HatclifF, and Robby. Expressing 
+checkable properties of dynamic systems: The Bandera Specification Language. 
+International Journal on Software Tools for Technology Transfer , 2002. To appear. 
+
+6. P. Cousot and R. Cousot. Abstract interpretation: A unified lattice model for static 
+analysis of programs by construction or approximation of fixpoints. In Conference 
+Record of the Fourth Annual ACM Symposium on Principles of Programming Lan- 
+guages, pages 238-252, 1977. 
+
+7. G.J. Holzmann D. Dams, W. Hesse. Abstracting C with abC. In Proc . 14 th 
+International Conference on Computer Aided Verification , July 2002. 
+
+8. Dennis Dams, Rob Gerth, and Orna Grumberg. Abstract interpretation of reactive 
+systems. ACM Transactions on Programming Languages and Systems , 19(2) :253 — 
+291, March 1997. 
+
+9. C. Demartini, R. Iosif, and R. Sisto. dSPIN : A dynamic extension of SPIN. In 
+Theoretical and Applied Aspects of SPIN Model Checking (LNCS 1680), September 
+1999. 
+
+10. Matthew B. Dwyer, John HatclifF, Roby Joehanes, Shawn Laubach, Corina S. 
+Pasareanu, Robby, Willem Visser, and Hongjun Zheng. Tool-supported program 
+abstraction for finite-state verification. In Proceedings of the 23rd International 
+Conference on Software Engineering , May 2001. 
+
+11. M.B. Dwyer, G.S. Avrunin, and J.C. Corbett. Patterns in property specifications 
+for finite-state verification. In Proceedings of the 21st International Conference on 
+Software Engineering , May 1999. 
+
+12 M. G^lnrdQ^LJvIartmez^IL-Menno,-and-E J-imentel^aiSEINLExteiiding-SEIN-- 
+
+with abstraction. In Proceedings of Ninth International SPIN Workshop , volume. 
+2318 of Lecture Notes in Computer Science , pages 254-258. Springer-Verlag, 2002. 
+
+13. Carsten K. Gomard and Neil D. Jones. Compiler generation by partial evaluation. 
+
+In G. X. Ritter, editor, Information Processing ’89. Proceedings 0 } the IFIP 11th 
+World Computer Congress , pages 1139-1144. IFIP, North-Holi and, 1989. 
+
+
+
+
+14. John Hatcliff. An introduction to partial evaluation using a simple flowchart lan- 
+guage. In John Hatcliff, Peter Thiemann, and Torben Mogensen, editors, Pro- 
+ceedings of the 1998 DIKU International Summer School on Partial Evaluation , 
+Tutorials in Computer Science, Copenhagen, Denmark, June 1998. 
+
+15. G. Holzmann. Logic verification of ANSI-C code with SPIN. In K. Havelund, edi- 
+tor, Proceedings of Seventh International SPIN Workshop , volume 1885 of Lecture 
+Notes in Computer Science , pages 131-147. Springer- Verlag, 2000. 
+
+16. Gerard J. Holzmann. The model checker SPIN. IEEE Transactions on Software 
+Engineering , 23(5):279-294, May 1997. 
+
+17. M. Huth and M. Ryan. Logic in Computer Science: Modelling and Reasoning about 
+Systems. Cambridge University Press, 1999. 
+
+18. Radu Iosif, Matthew B. Dwyer, and John Hatcliff. Translating Java for multiple 
+model checkers: the bandera back end. Technical Report 2002-1, SAnToS Labora- 
+tory Technical Report Series, Kansas State University, Department of Computing 
+and Information Sciences, 2002. 
+
+19. Neil D. Jones, Carsten K. Gomard, and Peter Sestoft. Partial Evaluation and 
+Automatic Program Generation. Prentice-Hall International, 1993. 
+
+20. Y. Kesten and A. Pnueli. Modularization and abstraction: The keys to formal 
+verification. In L. Brim, J. Gruska, and J. Zlatuska, editors, The 23rd International 
+Symposium on Mathematical Foundations of Computer Science , volume 1450 of 
+
+— Lecture. Notes. in-Computer Science. Springer- Verlag,.! 99JL_ 
+
+21. T. Lev- Ami and M. Sagiv. TVLA: A framework for Kleene-based static analysis. 
+In Proceedings of the 7th International Static Analysis Symposium (SAS’OO), 2000. 
+
+22. Z. Manna and A. Pnueli. The Temporal Logic of Reactive and Concurrent Systems: 
+Specification. Springer- Verlag, 1991. 
+
+23. Flemming Nielson, Hanne Riis Nielson, and Chris Hankin. Principles of Program 
+Analysis. Springer Verlag, 1999. 
+
+24. S. Owre, J, M. Rushby, and N. Shankar. PVS: A prototype verification system. In 
+Proceedings of the 1th International Conference on Automated Deduction (LNCS 
+601 % 1992. 
+
+25. Corina S. Pasareanu. Abstraction and Modular Reasoning for the Verification of 
+Software. PhD thesis, Kansas State University, 2001. 
+
+26. Corina S. Pasareanu, Matthew B. Dwyer, and Michael Huth. Assume-guarantee 
+model checking of software : A comparative case study. In Theoretical and Applied 
+Aspects of SPIN Model Checking (LNCS 16 80), September 1999. 
+
+27. Corina S. Pasareanu, Matthew B. Dwyer, and Willem Visser. Finding feasible 
+counter-examples when model checking abstracted Java programs. In Proceedings 
+of the 7th International Conference on Tools and Algorithms for the Construction 
+and Analysis of Systems, volume 2031 of Lecture Notes in Computer Science , April 
+2001 . 
+
+28. Rupak Majumdar Thomas A. Henzinger, Ranjit Jhala and Gregoire Sutre. Lazy 
+abstraction. In Proceedings of the 29th ACM Symposium on Principles of Pro - 
+gramming Languages ( POPL , 02 ), 2002. 
+
+29. Raja Valle-Rai, Laurie Hendren, Vijay Sundaresan, Patrick Lam, Etienne Gagnon, 
+andPhongGo. — Soot — a -Java optimizat ion fr amework.^In ^Proceedin^^ of CAS- 
+CON } 99, November 1999. 
+
+30. Eran Yahav. Verifying safety properties of concurrent Java programs using 3- valued 
+logic. In Proceedings of the 28th ACM Symposium on Principles of Programming 
+Languages (POPL’01), pages 27-40, January 2001. 
+
+

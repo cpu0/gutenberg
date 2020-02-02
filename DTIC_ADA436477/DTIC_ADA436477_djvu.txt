@@ -1,0 +1,2995 @@
+Supporting Binary Compatibility with Static Compilation* 
+
+
+Dachuan Yu Zhong Shao Valery Trifonov 
+Department of Computer Science, Yale University 
+New Haven, CT 06520-8285, U.S.A. 
+
+{yu, shao,trifonov}@cs.yale.edu 
+
+
+Abstract 
+
+There is an ongoing debate in the Java community on 
+whether statically compiled implementations can meet 
+the Java specification on dynamic features such as binary 
+compatibility. Static compilation is sometimes desirable 
+because it provides better code optimization, smaller 
+memory footprint, more robustness, and better intellec¬ 
+tual property protection. Unfortunately, none of the ex¬ 
+isting static Java compilers support binary compatibility, 
+because it incurs unacceptable performance overhead. 
+In this paper, we propose a simple yet effective solu¬ 
+tion which handles all of the binary-compatibility cases 
+specified by the Java Language Specification. Our ex¬ 
+perimental results using an implementation in the GNU 
+Java compiler shows that the performance penalty is on 
+average less than 2%. Besides solving the problem for 
+static compilers, it is also possible to use this technique 
+in JIT compilers to achieve an optimal balance point be¬ 
+tween static and dynamic compilation. 
+
+1 Introduction 
+
+Modern software applications are often built up by com¬ 
+bining many components. Some of these components 
+are shared libraries which allow multiple applications to 
+share large amounts of system software. 
+
+Shared libraries evolve over time so that new function¬ 
+ality can be added, bugs can be fixed, algorithms and ef¬ 
+ficiency can be improved, and deprecated functions can 
+be removed. Evolving or modifying these libraries can 
+affect applications that depend on them, thus library evo¬ 
+lution may cause compatibility problems. 
+
+However, it is usually undesirable to recompile a whole 
+application just to accommodate the changes in a single 
+
+* This work is supported in part by DARPA OASIS grant F30602- 
+99-1-0519, NSF grant CCR-9901011, and NSF ITR grant CCR- 
+0081590. Any opinions, findings, and conclusions contained in this 
+document are those of the authors and do not reflect the views of these 
+agencies. 
+
+
+component. In the case of widely distributed libraries, 
+used by many unknown applications, it is often imprac¬ 
+tical or impossible to recompile even only the importing 
+units. A popular current approach is to try to guaran¬ 
+tee that binaries can be directly replaced by compatible 
+binaries without compromising a working system. 
+
+Binary compatibility is a concept introduced to address 
+this problem. It was initially referred to as release-to- 
+release binary compatibility [10], and later defined in the 
+Java Language Specification (JLS) [11], which describes 
+the changes that developers are permitted to make to a 
+package or to a class or interface type while preserv¬ 
+ing compatibility with existing binaries. Thus the Java 
+binary compatibility prescribes conditions under which 
+modification and recompilation of classes do not neces¬ 
+sitate recompilation of other classes depending on them. 
+
+In the Java Virtual Machine [19], support for binary 
+compatibility is primarily due to the use of symbolic ref¬ 
+erences to look up fields and methods at run-time. How¬ 
+ever, in some cases a native compiler for Java is needed 
+that compiles Java (or bytecode) programs directly into 
+native code in the same manner as compilers for C/C++. 
+This ahead-of-time compilation is desirable because it 
+yields better optimized code, more robust deployed ap¬ 
+plications, and offers better intellectual property protec¬ 
+tion [3, 5, 7]. We will elaborate on this later. 
+
+Nevertheless, supporting binary compatibility with 
+ahead-of-time compilation is a hard problem because of 
+the seemingly contradictory requirements. When cer¬ 
+tain changes are allowed due to binary compatibility, the 
+contents of a class cannot be completely determined un¬ 
+til the class is loaded. However, ahead-of-time compilers 
+usually generate hard-coded offsets based on the layout 
+information of other classes at compile time. 
+
+A well-known problem is that the standard compila¬ 
+tion techniques for virtual methods in object-oriented 
+languages preclude binary compatibility (cf. the fragile 
+base class problem [12,26]). For example, the documen- 
+
+
+
+Report Documentation Page 
+
+
+Form Approved 
+OMB No. 0704-0188 
+
+
+Public reporting burden for the collection of information is estimated to average 1 hour per response, including the time for reviewing instructions, searching existing data sources, gathering and 
+maintaining the data needed, and completing and reviewing the collection of information. Send comments regarding this burden estimate or any other aspect of this collection of information, 
+including suggestions for reducing this burden, to Washington Headquarters Services, Directorate for Information Operations and Reports, 1215 Jefferson Davis Highway, Suite 1204, Arlington 
+VA 22202-4302. Respondents should be aware that notwithstanding any other provision of law, no person shall be subject to a penalty for failing to comply with a collection of information if it 
+does not display a currently valid OMB control number. 
+
+
+1. REPORT DATE 
+
+2005 
+
+
+2. REPORT TYPE 
+
+
+3. DATES COVERED 
+
+
+5a. CONTRACT NUMBER 
+
+
+5b. GRANT NUMBER 
+
+
+5c. PROGRAM ELEMENT NUMBER 
+
+
+5d. PROJECT NUMBER 
+
+
+5e. TASK NUMBER 
+
+
+5f. WORK UNIT NUMBER 
+
+
+4. TITLE AND SUBTITLE 
+
+Supporting Binary Compatibility with Static Compilation 
+
+
+6. AUTHOR(S) 
+
+
+7. PERFORMING ORGANIZATION NAME(S) AND ADDRESS(ES) 8. PERFORMING ORGANIZATION 
+
+Defense Advanced Research Projects Agency,3701 North Fairfax report number 
+
+Dr, Arlington,VA,22203-1714 
+
+9. SPONSORING/MONITORING AGENCY NAME(S) AND ADDRESS(ES) 10. SPONSOR/MONITOR'S ACRONYM(S) 
+
+11. SPONSOR/MONITOR'S REPORT 
+NUMBER(S) 
+
+12. DISTRIBUTION/AVAILABILITY STATEMENT 
+
+Approved for public release; distribution unlimited 
+
+13. SUPPLEMENTARY NOTES 
+
+14. ABSTRACT 
+
+There is an ongoing debate in the Java community on whether statically compiled implementations can 
+meet the Java specification on dynamic features such as binary compatibility. Static compilation is 
+sometimes desirable because it provides better code optimization, smaller memory footprint, more 
+robustness, and better intellectual property protection. Unfortunately, none of the existing static Java 
+compilers support binary compatibility, because it incurs unacceptable performance overhead. In this 
+paper, we propose a simple yet effective solution which handles all of the binary-compatibility cases 
+specified by the Java Language Specification. Our experimental results using an implementation in the 
+GNU Java compiler shows that the performance penalty is on average less than 2%. Besides solving the 
+problem for static compilers, it is also possible to use this technique in JIT compilers to achieve an optimal 
+balance point between static and dynamic compilation. 
+
+
+15. SUBJECT TERMS 
+
+
+16. SECURITY CLASSIFICATION OF: 
+
+
+a. REPORT 
+
+unclassified 
+
+
+b. ABSTRACT 
+
+unclassified 
+
+
+c. THIS PAGE 
+
+unclassified 
+
+
+17. LIMITATION OF 
+
+18. NUMBER 
+
+ABSTRACT 
+
+OF PAGES 
+
+
+16 
+
+
+19a. NAME OF 
+RESPONSIBLE PERSON 
+
+
+Standard Form 298 (Rev. 8-98) 
+
+Prescribed by ANSI Std Z39-18 
+
+
+
+
+
+tation on binary compatibility [30] in the EPOC C++ 
+System says: 
+
+... virtual member functions are for life—you can’t 
+add or remove virtual member functions, or change 
+the virtuality of a function, or change their decla¬ 
+ration order, or even override an existing function 
+that was previously inherited,... 
+
+For compliance with the binary-compatibility require¬ 
+ments of Java some existing native compilers solve this 
+problem by generating (at least) some of the code at run 
+time, which unavoidably negates some of the benefits of 
+pre-compilation. Other existing native compilers simply 
+have no support for binary compatibility, because the ob¬ 
+vious solutions (e.g. method lookup by name at run time) 
+seem to incur high performance overhead. 
+
+This paper presents a simple yet effective solution using 
+static compilation, which meets all Java binary compati¬ 
+bility requirements with little performance penalty. The 
+contributions are: 
+
+• In our solution, the compilation is fully static, 
+which allows the compiler to take advantage of the 
+well-developed static compilation techniques for 
+better code optimization. 
+
+• Our solution covers all the cases specified in the 
+JLS. Different features—including methods, fields, 
+interfaces, and modifiers—are supported by the 
+same set of simple core techniques. 
+
+• Our solution also detects all binary-incompatible 
+changes and gracefully raise proper exceptions at 
+load or ran time. 
+
+• Our solution is efficient. We describe an implemen¬ 
+tation in the GNU Java compiler (GCJ). The perfor¬ 
+mance test shows that the performance penalty of 
+our new technique is on average less than 2%. 
+
+In the remainder of this introduction, we briefly describe 
+the benefits of static compilation. 
+
+1.1 Why Static Compilation? 
+
+Two popular approaches for compiling Java pro¬ 
+grams are Just-In-Time (JIT) compilation (e.g. Sun 
+Hotspot [29], Cacao [17], OpenJIT [24], shuJIT [28], 
+vanilla Jalapeno [1]) and static compilation (e.g. Bullet- 
+Train [22], Excelsior JET [20], GCJ [32], IBM Visu- 
+alAge for Java [13], JOVE [14]). It would be wrong to 
+
+
+say one approach is definitely better than the other, since 
+they are suited for different situations [7]. In fact, cur¬ 
+rent research on “quasi-static compilation” [27] shows 
+that combining these two may yield excellent results. 
+
+In practice, static Java compilers are sometimes desir¬ 
+able over JIT compilers because they have many advan¬ 
+tages [3, 5, 7]: 
+
+• Static compilation yields more robust deployed ap¬ 
+plications. On the one hand, a deployment JIT may 
+be different from the development JIT, which can 
+cause problems due to even slight differences in the 
+virtual machine or library code. With static com¬ 
+pilation, programs are compiled into native code 
+allowing the developer to test exactly what is de¬ 
+ployed. On the other hand, compilers have bugs. 
+Crashes caused by static compiler bugs sometimes 
+happen at compile time (unless the bug is the kind 
+that generates bad code silently), while bugs in the 
+JIT may cause crashes at program execution time, 
+and some of them may only surface after a por¬ 
+tion of the program has been executed many times. 
+Moreover, if the program crashes due to a bug in 
+either the compiler or the program itself, statically 
+compiled code is much easier to debug because the 
+run-time trace is more predictable. 
+
+• Static compilation provides better intellectual prop¬ 
+erty protection. Native code is much harder to 
+reverse-engineer than Java bytecode. 
+
+• Static Java compilers can perform resource inten¬ 
+sive optimization before the execution of the pro¬ 
+gram. In contrast, JIT compilers must perform 
+analysis at execution time, thus are limited to sim¬ 
+ple optimizations that can be done without a large 
+impact on the combined compile and execute time. 
+
+• Static compilation achieves greatly reduced start¬ 
+up cost, reduced memory usage, automatic sharing 
+of code by the OS between applications, and easier 
+linking with native code. 
+
+• Last but not least, static compilation is better suited 
+for code certification than JIT compilation. It is sig¬ 
+nificantly easier to achieve higher safety assurance 
+by removing the compiler from the trusted comput¬ 
+ing base. There has been a lot of work done in 
+this area [23, 21, 18] which mostly focuses on static 
+compilation. 
+
+Regardless of the above advantages, there is an ongoing 
+debate in the Java community on whether statically com¬ 
+piled implementations can meet the Java specification 
+
+
+
+on dynamic features such as binary compatibility. Our 
+paper presents a scheme that accommodates the seem¬ 
+ingly contradictory goal of full Java compliance and 
+static compilation, thus showing that binary compatibil¬ 
+ity can indeed be supported using static compilers. Fol¬ 
+lowing the inspiration of “quasi-static compilation” [27], 
+this technique in practice can also be used together with 
+other JIT compilation techniques to achieve an optimal 
+balance point between static and dynamic compilation. 
+Thus we believe this result is of interest to the general 
+audience in the JVM community. 
+
+
+2 Background 
+
+Java binary compatibility requires that changes in certain 
+aspects of a class C from version to version must not en¬ 
+tail the recompilation of other classes that are clients of 
+C. (Client classes of C are those that reference C in some 
+way, such as by accessing members of objects of C, or by 
+extending C.) For example, changing the order of meth¬ 
+ods and fields of a class or adding methods and fields to 
+a class must not force recompilation of its clients. 
+
+Java virtual machines allow these kinds of changes to oc¬ 
+cur between releases of a class because references from 
+one class to the fields and methods of other classes are 
+made by symbolic names embedded in the class file. 
+These references are transformed into addresses and off¬ 
+sets during the process of resolution. 
+
+However, static compilers that do not consider binary 
+compatibility usually generate these offsets hard-coded, 
+ahead of (link) time. This implies that changes to a class 
+that affect the layout of fields and methods in the class 
+could require all of its clients to be recompiled, since 
+they contain hard-coded addresses and offsets based on 
+the old layout. Failure to recompile all clients of a mod¬ 
+ified class can result in unexpected run-time behavior. 
+
+Current run-time compilers for Java have encountered 
+similar problems. Taking the virtual method invocation 
+as an example, binary compatibility is usually accom¬ 
+plished using run-time compilation techniques: Just-in- 
+time compilers generate code for classes at run-time. 
+During the run-time compilation, a virtual method invo¬ 
+cation on an object of a loaded class can be safely com¬ 
+piled based on the determined vtable (virtual method ta¬ 
+ble) of that class. However, a virtual method invocation 
+on an object of a class which is not loaded yet cannot be 
+handled in the same manner. In this case, the compiler 
+emits special code which “stitches” the actual method 
+invocation code lazily when it is executed. 
+
+
+For optimization purposes, JIT compilers often use 
+guarded inlining (where the guard checks for the ob¬ 
+ject type at run-time) to handle the scenario where the 
+inlining is invalidated by further class loading. When 
+such a scenario occurs, run-time compilation has to be 
+performed. There has been also work on techniques for 
+inlining virtual methods more efficiently [6, 15, 25]. 
+
+Typically, static compilers use global or whole-program 
+analysis [4] to do inlining or devirtualization. How¬ 
+ever, without the ability to perform compilation at run¬ 
+time, they assume that no changes will be made to 
+classes referred to by the compiled code. Hence, they 
+do not comply with the JLS. The trade-off between bi¬ 
+nary compatibility (for full compliance with the JLS) 
+and cross-class inlining is obviously an issue for static 
+Java compilers. While our solution for binary compat¬ 
+ibility does not directly support cross-class inlining, in 
+cases when dynamic compilation may not be desirable 
+due to various reasons discussed in section 1.1, an im¬ 
+plementation would employ our solution together with 
+other schemes that support inlining (but not binary com¬ 
+patibility) to achieve optimal results. For instance with 
+quasi-static compilation [27] both pre-compiled native 
+code and bytecode of classes are shipped together. When 
+binary changes invalidate the pre-compiled native code, 
+the VM falls back to compiling or even interpreting the 
+bytecode. Similarly, a version of native code compiled 
+with cross-class inlining can be shipped together with 
+native code compiled using our approach. In the com¬ 
+mon case, when no changes to other classes are made, 
+the inlined version of native code would be used for 
+maximum efficiency. In cases when binary changes are 
+detected, the system would fall back to running the ver¬ 
+sion compiled without inlining but with support for bi¬ 
+nary compatibility, thus avoiding run-time compilation. 
+
+In summary, run-time compilers support binary com¬ 
+patibility with various run-time compilation techniques. 
+However none of the existing static Java compilers pro¬ 
+vide support for binary compatibility, primarily because 
+the high overhead negates much of the advantages of 
+static compilation. 
+
+3 Static Compilation vs Binary Compati¬ 
+bility 
+
+In this section, we give examples to illustrate the con¬ 
+cept of Java binary compatibility. We also show how 
+the naive application of the standard vtable approach for 
+static compilation fails. 
+
+Consider the following program. Class Programmer 
+
+
+
+JavaProgrammer’s vtable 
+
+
+defines two virtual methods, eat and hack. Class 
+JavaProgrammer extends class Programmer, overrides 
+those two methods, and defines a new virtual method 
+study. The main method of class Manager creates in¬ 
+stances of both the above classes and does some virtual 
+method calls. Note that at run-time the variable Whoami 
+contains an object of class JavaProgrammer, although 
+its static class is Programmer. 
+
+public class Programmer { 
+void eat () { ... }; 
+void hack () { ... }; 
+
+} 
+
+public class JavaProgrammer 
+extends Programmer! 
+void eat () { ... }; 
+void hack () { ... }; 
+void study() { ... }; 
+
+} 
+
+public class Manager { 
+
+public static void main (String args []) { 
+
+// some code that runs for days... 
+
+Programmer Tom = new ProgrammerO; 
+JavaProgrammer Jerry = new JavaProgrammer(); 
+Programmer Whoami = new JavaProgrammer0; 
+
+
+Programmer’s vtable 
+
+
+Entry 0 — 
+
+-»- eat 
+
+Entry 0 — 
+
+-1 eat 
+
+Entry 1 — 
+
+-*- hack 
+
+Entry 1 — 
+
+-— hack 
+
+
+Entry 2 
+
+-—study 
+
+
+Figure 1: The vtables. 
+
+
+Programmer’s vtable 
+
+
+JavaProgrammer’s vtable 
+
+
+Entry 0 — 
+
+r*-sleep 
+
+Entry 1 — 
+
+-»- eat 
+
+Entry 2 
+
+— hack 
+
+
+Entry 0 — 
+
+-»- eat 
+
+Entry 1 — 
+
+-— hack 
+
+Entry 2 
+
+-— study 
+
+
+Figure 2: Scenario A: adding a method. 
+
+changes are made to the binary of a class, the locations 
+of method pointers in the vtable may change, which in¬ 
+validates the offset information used to compile other 
+classes. Even worse, vtables reachable through objects 
+of the same static class may now have different layout, 
+as illustrated in the following subsections. 
+
+3.1 Scenario A: Adding a Method 
+
+
+Tom.eat(); 
+
+Tom.hack(); 
+Jerry.eat(); 
+Jerry.hack(); 
+Jerry.study(); 
+
+
+}} 
+
+The standard technique used in object-oriented program¬ 
+ming language implementations supports virtual method 
+dispatch by collecting the virtual methods of a class in 
+a record called a vtable, and providing a pointer to this 
+record in each object of the class. When the three classes 
+above are compiled, the layout of the vtables of classes 
+Programmer and JavaProgrammer is determined stati¬ 
+cally (Figure 1), and the code in class Manager is com¬ 
+piled to invoke virtual methods by accessing the corre¬ 
+sponding entries in the vtables of these classes, reach¬ 
+able through the respective objects. Since the variable 
+Whoami, declared of class Programmer, can be bound 
+to an object of class JavaProgrammer, the layout of the 
+vtable of JavaProgrammer must be consistent with that 
+of Programmer, so that virtual method invocations can 
+be compiled to use the same offset in the vtable for a 
+given method of Programmer, regardless of the dynamic 
+class of the object. 
+
+However, this vtable approach cannot be directly ap¬ 
+plied if we want to support binary compatibility. When 
+
+
+Here we make a binary-compatible change to class 
+Programmer by adding a new method sleep at the very 
+beginning. 
+
+
+public class Programmer 
+void sleep() { ... }; 
+void eat () { ... }; 
+void hack () { ... }; 
+
+
+{ 
+
+// 
+
+
+New Method! 
+
+
+} 
+
+
+Now we recompile class Programmer only. The vta¬ 
+bles for Programmer and JavaProgrammer are shown 
+in Figure 2. The vtable layout of class Programmer has 
+changed, and it is no longer consistent with the vtable 
+layout of class JavaProgrammer. When these classes 
+are loaded and Manager.main invoked, the code for 
+Tom. eat will access the wrong entry in the vtable and 
+end up calling method sleep. A similar problem oc¬ 
+curs with Tom. hack. This is exactly the behavior shown 
+by the current GCJ, which uses the standard vtable ap¬ 
+proach, and thus does not support binary compatibility. 
+
+Note that even if we had added the method sleep at the 
+end of class Programmer, the problem still exists, be¬ 
+cause when we recompile class Programmer, method 
+sleep will use entry 2 of the vtable. However the 
+entry 2 of the vtable of class JavaProgrammer is al¬ 
+ready occupied by method study, and the invocation 
+Jerry. study of Manager was compiled based on this. 
+
+
+
+
+
+
+
+
+
+Programmer’s vtable JavaProgrammer’s vtable 
+
+
+
+Figure 3: Scenario B: removing a method. 
+
+The observation here is that the vtable layout may 
+change due to changes in the class. So we really should 
+not have made any assumptions about the vtable lay¬ 
+outs of Programmer and JavaProgrammer in Manager. 
+Moreover, the information available at compile time is 
+not sufficient for building the vtables, since classes in the 
+same hierarchy may change, yet we still need to main¬ 
+tain consistency between a subclass and its superclass. 
+
+3.2 Scenario B: Removing a Method 
+
+Some source code modifications, such as removing a 
+method from a class, are binary incompatible changes in 
+the sense that other programs which work fine with the 
+old binary may cease to function when linked with the 
+evolved new binary due to the removal of the method. 
+However, the safety of modern software systems de¬ 
+mands that under no circumstances may an application 
+crash. The JLS requires that, under the incompatible 
+change in which a method is removed, the program 
+should still run as long as the missing method is not used, 
+and that an exception should be raised if code tries to in¬ 
+voke the missing method at run time. 
+
+Consider what happens when we remove the method 
+eat from class Programmer in the original program 
+and recompile it. The vtables for Programmer and 
+JavaProgrammer are shown in Figure 3. Obviously, the 
+vtable layout of class Programmer has changed, and it 
+is no longer consistent with the vtable layout of class 
+JavaProgrammer. 
+
+public class Programmer { 
+
+// void eat () { ... }; // Removed! 
+void hack () { ... }; 
+
+} 
+
+In this case, the correct behavior of a virtual method 
+invocation ob j . eat in any old binary depends on the 
+static class of the object ob j. If the static class of ob j 
+is JavaProgrammer, the method invocation works fine, 
+as if no change had been made. However, if the static 
+class of obj is Programmer, a NoSuchMethodError 
+exception should be thrown when the method is in¬ 
+voked, even if obj actually contains an object of class 
+JavaProgrammer which defines method eat. 
+
+
+Programmer’s viable OOProgrammer’s vtable JavaProgrammer’s viable 
+
+
+
+Figure 4: Scenario C: changing class hierarchy. 
+
+The standard vtable approach fails in this case as 
+well. The invocation Tom.eat in Manager will call 
+the wrong method hack, while Tom.hack will have 
+implementation-dependent results, since it uses a pointer 
+located outside of the actual vtable. 
+
+The observation here is that we need to gracefully handle 
+incompatible changes by raising exceptions at run time. 
+Of course, we still need to keep in mind the consistency 
+of vtables. 
+
+3.3 Scenario C: Binary Change at Run Time 
+
+Some static compilers (e.g. BulletTrain) perform depen¬ 
+dency analysis before executing a Java program, and 
+attempt to recompile if inconsistency is detected. In 
+the cases of scenarios A and B, these compilers would 
+have refused to run Manager, or attempted to recom¬ 
+pile it automatically. The problem is that this behavior 
+is not only non-compliant with the binary compatibility 
+requirements of the JLS (which intends to solve these 
+issues without recompilation of the client classes of the 
+changed class), but also that this dependency analysis 
+cannot always be done statically. 
+
+A simple example which presents a challenge to the 
+static dependency analysis scheme is reflection. Using 
+reflection, a program can load arbitrary class files which 
+are not known at compile time. This means that the static 
+analysis may not work out all the dependencies. Even if 
+reflection is not a concern, binary changes may occur 
+at run time after some classes are already loaded and 
+executed. In these cases, recompilation is not possible. 
+Here we use another binary-compatible change, namely 
+the insertion of a new class into the class hierarchy, to 
+demonstrate the problem. 
+
+public class OOProgrammer 
+
+extends Programmer { // New Class! 
+void drinkO { ... }; 
+
+} 
+
+public class JavaProgrammer 
+
+extends OOProgrammerf // New Hierarchy! 
+void eat () { ... }; 
+void hack () { ... }; 
+void study() { ... }; 
+
+> 
+
+
+
+
+
+
+Based on the original program, before we make 
+any changes, suppose class Manager (but not 
+JavaProgrammer) is already loaded and being ex¬ 
+ecuted. During the execution of the first line of 
+main, we insert a new class OOProgrammer between 
+Programmer and JavaProgrammer. We compile 
+OOProgramer and recompile JavaProgrammer. The 
+vtables are shown in Figure 4. Clearly, the vtable 
+layout of JavaProgrammer has changed. The line 
+for Jerry, study in Manager is going to call method 
+drink which happens to reside in the entry 2 of Jerry’s 
+vtable after the change. 
+
+The lesson is, binary changes may occur after some 
+classes are loaded. Static dependency analysis and re¬ 
+compilation are sometimes not only undesirable, but un¬ 
+affordable. Reflection is an additional complication. 
+
+4 Our Approach 
+
+In this section we present our solution for static com¬ 
+pilers to support Java binary compatibility. Table 1 and 
+Table 2 summarize all the binary changes to classes and 
+interfaces specified in Chapter 13 of the Java language 
+specification [11]. Compatible changes are marked with 
+“+” and incompatible changes are marked with We 
+present the solutions for these changes in the coming 
+subsections. In these tables, SEC x means the solution 
+is presented in Section x. The symbol yj is only used for 
+binary compatible changes. It means that the solution is 
+trivial and requires no change to the existing implemen¬ 
+tation. The numbers associated with each binary change 
+are used for cross-referencing in later sections. 
+
+4.1 Virtual Methods 
+
+The major difficulty in supporting Java binary compati¬ 
+bility is the handling of virtual methods. In this section, 
+we present our idea in a simplified setting where only 
+virtual methods under single inheritance are considered. 
+Temporarily putting aside other features (e.g. modifiers) 
+makes it easier to understand our solution. Extending 
+this solution to work for static methods and constructors 
+is trivial. All the other language features can be sup¬ 
+ported with simple extensions which we present later. 
+
+4.1.1 Idea 
+
+From the lessons we learned in Section 3, we know that 
+even though we want to compile classes ahead of time, 
+we cannot afford to build the vtables statically. The in¬ 
+formation we get during the ahead-of-time compilation 
+
+
+No. 
+
++/- 
+
+Binary Change to Class 
+
+Solution 
+
+1 
+
++ 
+
+adding(overriding) 
+method/constructor (without 
+modifier change) 
+
+SEC 4.1 
+
+2 
+
++ 
+
+changing hierarchy preserv¬ 
+ing super(s) 
+
+SEC 4.1 
+
+3 
+
++ 
+
+adding field (without modifier 
+change) 
+
+SEC 4.2 
+
+4 
+
++ 
+
+abstract —>• nonabstract 
+
+V 
+
+5 
+
++ 
+
+final —» nonfinal 
+
+V 
+
+6 
+
++ 
+
+nonpublic —>• public 
+
+V 
+
+7 
+
++ 
+
+allowing more access to mem¬ 
+ber 
+
+V 
+
+8 
+
++ 
+
+final field —> nonfinal field 
+
+V 
+
+9 
+
++ 
+
+adding/deleting transient 
+
+modifier 
+
+y/ 
+
+10 
+
++ 
+
+changing formal parameter 
+name of method/constructor 
+
+yj 
+
+11 
+
++ 
+
+abstract method —>• nonab¬ 
+stract 
+
+V 
+
+12 
+
++ 
+
+final method —> nonfinal; non¬ 
+final static meth —>■ final static 
+
+V 
+
+13 
+
++ 
+
+changing synchronized modi¬ 
+fier 
+
+V 
+
+14 
+
++ 
+
+changing throws clause 
+
+V 
+
+15 
+
++ 
+
+changing method/constructor 
+body 
+
+V 
+
+16 
+
++ 
+
+adding method/constructor 
+that overloads existing one 
+
+V 
+
+17 
+
++ 
+
+changing static initializer 
+
+V 
+
+18 
+
+- 
+
+removing method/constructor 
+
+SEC 4.1 
+
+19 
+
+- 
+
+removing field 
+
+SEC 4.2 
+
+20 
+
+— 
+
+changing hierarchy without 
+preserving super(s) 
+
+SEC 4.4.1 
+
+21 
+
+— 
+
+noncircular hierarchy —> cir¬ 
+cular hierarchy 
+
+SEC 4.4.1 
+
+22 
+
+- 
+
+nonfinal —> final 
+
+SEC 4.4.1 
+
+23 
+
+- 
+
+nonabstract —> abstract 
+
+SEC 4.4.1 
+
+24 
+
+— 
+
+nonfinal virtual method —> fi¬ 
+nal virtual 
+
+SEC 4.4.2 
+
+25 
+
+- 
+
+restricting access to member 
+
+SEC 4.4.2 
+
+26 
+
+- 
+
+nonfinal field —$• final field 
+
+SEC 4.4.2 
+
+27 
+
+- 
+
+static «-> instance member 
+
+SEC 4.4.2 
+
+28 
+
+— 
+
+nonabstract method —> ab¬ 
+stract 
+
+SEC 4.4.2 
+
+29 
+
+- 
+
+public —> nonpublic 
+
+SEC 4.4.2 
+
+30 
+
++/- 
+
+adding(overriding) method 
+(with modifier change) 
+
+SEC 4.4.3 
+
+31 
+
++/- 
+
+adding field (with modifier 
+change) 
+
+SEC 4.4.3 
+
+32 
+
++/- 
+
+changing signature 
+
+SEC 4.4.3 
+
+33 
+
++/- 
+
+about native methods 
+
+SEC 4.4.3 
+
+
+Table 1: Java binary compatibility summary: classes. 
+
+
+
+
+
+loaded class cache 
+
+
+ctable list 
+
+
+A B C 
+
+X 
+
+
+i 
+
+
+A 
+
+B 
+
+X 
+
+
+T 
+
+
+B’s data and code area 
+ctable oil tab vtable 
+
+
+
+kl 
+
+
+2 
+
+
+k2 
+
+
+
+
+
+global allocation table 
+
+
+A 
+
+
+
+
+B — 
+
+
+r 
+
+h -> 1 
+
+C — 
+
+
+j 
+
+m -> 2 
+
+X 
+
+--I 
+
+
+
+
+T 
+
+
+
+
+ft -> 1 
+f2 -> 2 
+
+
+C’s data and code area 
+
+
+ctable off_tab vtable 
+
+► EXN 
+
+
+Ill 
+
+
+Figure 5: Our solution. 
+
+
+No. 
+
++/- 
+
+Binary Change to Interface 
+
+Solution 
+
+34 
+
++ 
+
+changing hierarchy preserv¬ 
+ing super(s) 
+
+SEC 4.3 
+
+35 
+
++ 
+
+nonpublic —> public 
+
+V 
+
+36 
+
++ 
+
+adding/deleting transient 
+
+modifier 
+
+V 
+
+37 
+
++ 
+
+changing formal parameter 
+name of method 
+
+V 
+
+38 
+
++ 
+
+changing synchronized 
+
+modifier 
+
+V 
+
+39 
+
++ 
+
+adding method that over¬ 
+loads existing one 
+
+V 
+
+40 
+
+- 
+
+removing member 
+
+SEC 4.3 
+
+41 
+
+
+changing hierarchy without 
+preserving super(s) 
+
+SEC 4.4.1 
+
+42 
+
+- 
+
+public —> nonpublic 
+
+SEC 4.4.2 
+
+43 
+
++/- 
+
+adding field 
+
+SEC 4.2 
+
+SEC 4.4.3 
+
+44 
+
++/- 
+
+adding method 
+
+SEC 4.3 
+SEC 4.4.3 
+
+45 
+
++/- 
+
+changing signature 
+
+SEC 4.4.3 
+
+
+Table 2: Java binary compatibility summary: interfaces. 
+
+is not sufficient to determine the vtable layout. Besides, 
+we need to handle our compilation carefully so that we 
+can detect binary-incompatible changes and emit error 
+messages gracefully. 
+
+We solve this problem by building vtables during class 
+loading. Once loaded, a class is considered fixed. Fur¬ 
+ther changes to this class can be ignored, according to 
+the JLS. Thus we can safely determine the layout of the 
+vtables. 
+
+A minor complication is that vtable layouts have to be 
+
+
+consistent between a superclass and a subclass. In other 
+words, a method m is located at the same position in 
+the vtable of a subclass as in the vtable of a superclass. 
+Luckily, the loading of a superclass precedes the loading 
+of a subclass, which makes it possible to construct the 
+vtable of the subclass based on the vtable layout of the 
+superclass. In our solution, we maintain this consistency 
+with the help of a global allocation table which reflects 
+the layout of the vtables of all the loaded classes. During 
+the loading of a class, we check the global allocation 
+table to learn the vtable layout of the superclass. Then 
+we follow the layout of the superclass and construct the 
+class’s vtable by appending fresh entries at the end. We 
+also record the newly determined layout in the global 
+allocation table so that any subclasses can access it. 
+
+The problem now is how to statically compile a virtual 
+method invocation when the vtable layout is not deter¬ 
+mined statically. We handle this by introducing an extra 
+level of indirection by compiling virtual method invoca¬ 
+tions to fetch an offset table entry before accessing the 
+vtable. The offset table maps a virtual method to the off¬ 
+set of the method in the vtable. Its entries are filled in at 
+run time when the corresponding class is loaded. 
+
+The idea of our approach is shown in Figure 5. To en¬ 
+able this approach, we need to make changes to both the 
+compiler and the class loader. 
+
+Compiler Every class is statically compiled to contain 
+a customizing table (ctable) and an offset table (off .tab). 
+The size of the ctable is proportional to the number of 
+distinct external method invocations in the class. For 
+each distinct external method referenced in the code of 
+the class, there is a corresponding entry in the ctable. In 
+a class C , if an external method / is invoked on both an 
+
+
+
+
+
+
+
+
+
+object of a class A and an object of its subclass B, then 
+both A.f and B.f will appear in C’s ctable. A ctable 
+entry maps an external method to a unique natural num¬ 
+ber. This natural number is the offset of the entry for the 
+external method in the offset table. The offset table en¬ 
+tries are filled in incrementally at run time according to 
+the information in the global allocation table. A virtual 
+method invocation is compiled to go through the corre¬ 
+sponding offset table entry before accessing the vtable. 
+
+Class loader The class loader has to maintain the global 
+allocation table, the offset tables, and the vtables during 
+class loading. When a class X is loaded, the class loader 
+constructs the vtable for X based on the vtable layout of 
+the superclass of X, which is specified in the global allo¬ 
+cation table. Here we reserve the entry 0 to point to some 
+special exception code. Once the vtable is constructed, 
+the class loader registers the vtable layout in the global 
+allocation table. This information is also propagated to 
+the offset tables of the loaded client classes of A". In this 
+step it is possible that the offset table of a certain class 
+,4 contains an entry for a method to of class X, while m 
+does not actually exist in this newly loaded class X. This 
+means that there must have been some binary incompat¬ 
+ible changes (e.g. to was removed from X, while ,4 was 
+compiled with an old version of .Y). In this case, the 
+class loader puts the special offset 0 in the corresponding 
+offset table entry. The entry 0 of a vtable always points 
+to some special code that would raise proper exceptions 
+when the method m is invoked. 
+
+Example Consider what happens at run time when ex¬ 
+ecuting a virtual method invocation o. m, where o is of 
+static class C. Suppose this method invocation appears in 
+the body of class B. The statically determined ctable of 
+class B designates an offset k for the method m of class C. 
+In our scheme, o. m is compiled to access the entry k of 
+class B's offset table for a new offset k'. This new offset 
+k 1 is copied from the global allocation table during class 
+loading. It is the actual offset of the method m in the 
+vtable of class C. Although the dynamic class of object 
+o could be a subclass of C, it is safe to use the offset k' 
+to access the vtable of object o for invoking the method, 
+because we have arranged the vtables of a superclass and 
+its subclasses to be consistent. 
+
+Correctness The correctness of our solution for vir¬ 
+tual methods is based on the following observations: the 
+global allocation table provides a correct view of all the 
+vtables of the loaded classes; the vtable of a subclass is 
+consistent with the vtable of its superclass; all offset ta¬ 
+bles are consistent with the global allocation table; and 
+a virtual method invocation cannot be executed before 
+the class of the receiver object is loaded. We refer in¬ 
+
+
+terested readers to our internal report [31] for a formal 
+development and its soundness proof. 
+
+
+4.2 Fields 
+
+The support for fields can be separated into three cate¬ 
+gories: support for private fields, support for non-private 
+fields, and support for various kinds of access modifiers. 
+
+Private fields can only be referenced from within the 
+defining class. Thus they do not require any special care 
+for binary compatibility. 
+
+Changing non-private fields may affect other classes that 
+depend on them. A similar technique as we used for 
+methods can be used here, though it may be relatively 
+less efficient. However, it is generally good software en¬ 
+gineering practice to limit the use of non-private fields. 
+Using non-private fields is also discouraged in the Bi¬ 
+nary Compatibility chapter of the JLS; to quote from 
+Section 13.4.7 of JLS [11], “Widely distributed pro¬ 
+grams should not expose any fields to their clients.” In 
+fact, non-private fields (especially as part of public APIs) 
+seem to be quite rare. To the authors’ knowledge, they 
+are almost non-existent in the standard Java libraries. We 
+believe that the inefficiency here will not have much im¬ 
+pact in practice. 
+
+Nevertheless, the handling of removed fields is tricky. 
+Unlike calling a method, the trick with reserving the 0- 
+offset entry will not work in this case because accessing 
+it as a field will not raise any exceptions. Using a run¬ 
+time check for every field access to determine whether 
+the offset for a field is valid has too great a cost in per¬ 
+formance. Our solution is, instead of detecting miss¬ 
+ing fields lazily, to raise exceptions at class loading time 
+when trying to fill in an offset table entry for a field, if 
+the corresponding information is not in the global allo¬ 
+cation table. Note that this solution does not obey the 
+JLS on the particular aspect that exceptions of a missing 
+field should be raised lazily. For full compliance with 
+the JLS, one possible solution is to fill in the offset table 
+entry of the missing field with some special offset which 
+triggers an OS trap when accessed. A similar technique 
+is introduced by Joisha et al. [16] for the IBM Quick¬ 
+silver quasi-static compiler [27] for a different purpose, 
+namely to trigger the “stitching” (or linking) operations. 
+
+More surprisingly, adding a field is not always a compat¬ 
+ible change if changes of modifiers are involved. We dis¬ 
+cuss this peculiarity in Section 4.4.3 together with other 
+modifier changes. 
+
+
+
+4.3 Interfaces 
+
+The common practice in supporting Java interfaces is to 
+use interface tables (itables); we refer the reader to the 
+work of Alpern et al. [2] for a discussion of the prior 
+implementation techniques for interface dispatch and an 
+efficient implementation of Java interfaces. For each in¬ 
+terface that a class implements, there is a correspond¬ 
+ing itable which contains all the methods declared in the 
+interface. At run time, an interface method invocation 
+would involve looking up the itable by interface name, 
+fetching the address of the interface method from a fixed 
+offset, determined at compile time, and invoking it. The 
+itable look-up mechanism provides natural support for 
+binary compatibility; however, if the method layout of 
+an itable may change, it would be wrong to use a fixed 
+offset to access an interface method. 
+
+Fortunately, this is exactly the same problem that we 
+solved for virtual methods and vtable dispatch. All we 
+have to do is make sure interface method invocations go 
+through the offset table, and fill in the offset table incre¬ 
+mentally at class loading time once the itable layout is 
+determined. 
+
+4.4 Other Changes 
+
+All the other binary changes specified by the JLS can 
+be supported by making simple extensions to the tech¬ 
+niques discussed so far. They happen to all be incom¬ 
+patible changes, and fall into the following categories. 
+(The numbers at the beginning of the bullets are used 
+for cross-referencing with the entries in Table 1 and Ta¬ 
+ble 2.) 
+
+4.4.1 Checking constraints 
+
+The incompatible changes in this category are han¬ 
+dled by maintaining constraints either explicitly or 
+implicitly, and checking them against the loaded classes 
+during class loading. When any of the constraints 
+are violated, exceptions are raised (VerifyError, 
+ClassCircularityError, InstantiationError, 
+etc). 
+
+• (20,41) When compiling a class, we add a con¬ 
+straint for every upward cast indicating the ex¬ 
+pected inheritance relationship. During execution, 
+we have the system maintain all the constraints 
+specified by the currently loaded classes. When a 
+class is loaded, we check its constraints against the 
+loaded class hierarchy. We also check the newly 
+
+
+loaded class against the constraints maintained by 
+the system. 
+
+• (21) If the class hierarchy becomes circular due to 
+incompatible changes, we can detect it during class 
+loading. 
+
+• (22) If a class Sub inherits a nonfinal class Super , 
+and Super is changed to be final, we can detect it 
+during the loading of class Sub. 
+
+• (23) Abstract classes cannot be used to create in¬ 
+stances. Similar to what we did for upward casts, 
+we add a constraint for every instance creation indi¬ 
+cating that the class being instantiated cannot be an 
+abstract class. These constraints are checked during 
+class loading. 
+
+4.4.2 Tagging and exception handling 
+
+Most modifier-incompatible changes can be handled by 
+tagging the global allocation table entries with modifiers 
+(e.g. access control, readable/writable, instance/static, 
+etc.). In the offset tables, the entries are tagged with 
+the expected modifiers, too. During class loading, the 
+class loader decides whether the modifiers are compati¬ 
+ble, and fills in an offset table entry with the registered 
+offset only if they are. 
+
+While we could use offset 0 for all kinds of error han¬ 
+dling, it is usually preferred to raise different exceptions 
+on different incompatible changes. To achieve this, we 
+can reserve more entries in the vtables and other data 
+structures (e.g. itables) for various exception code. If 
+a certain access is denied according to the global allo¬ 
+cation table, the offset of the corresponding exception 
+entry is used. 
+
+• (24) Final virtual methods cannot be overridden. 
+During class loading, a subclass studies the vtable 
+layout of its superclass. A tag in the global al¬ 
+location table indicates whether a virtual method 
+is final. If a final virtual method is overridden, 
+VerifyError exception is raised immediately. 
+
+• (25) If a binary change restricts access to a mem¬ 
+ber, the tag in the corresponding global allocation 
+table entry can be used to decide whether an ac¬ 
+cess is granted. If an access attempt to a field is 
+denied, IllegalAccessError exception is imme¬ 
+diately raised. If an access attempt to a method or 
+constructor is denied, the offset of the exception en¬ 
+try is used. 
+
+
+
+Manager’s offset table 
+
+
+• (26) If a field that was not final is changed to 
+be final, then it can break compatibility with pre¬ 
+existing binaries that attempt to assign new values 
+to the field. Our solution is to tag the final field with 
+read-only access in the global allocation table. If 
+some offset table is expecting the field to be tagged 
+with writable access, IllegalAccessError ex¬ 
+ception is raised. 
+
+• (27) Changing the static modifier of members 
+could raise exceptions when the member is ac¬ 
+cessed. Static members and instance members are 
+tagged differently in the global allocation table and 
+the offset tables. In the case of field modifier mis¬ 
+match, IncompatibleClassChangeError ex¬ 
+ception is raised; while in the case of modifier mis¬ 
+match of other members, the entry in the table is 
+filled with the offset for code raising the exception. 
+
+• (28) An abstract method cannot be invoked. If 
+a subclass S inherits a method / defined in the 
+old binary of a superclass C, and C is changed 
+by declaring / as an abstract method, invoking / 
+on an object of S is going to raise an exception 
+(AbstractMethodError). Our solution is, when 
+constructing the vtable of a class C that declares an 
+abstract method /, to put a pointer to the exception 
+code in the entry of /. A subclass that does not de¬ 
+fine / inherits the exception code, while a subclass 
+that defines / works as if no change is made. 
+
+• (29,42) The members of nonpublic classes cannot 
+be accessed from outside the package. Having ac¬ 
+cess tags in the corresponding global allocation ta¬ 
+ble entries solves this problem. Similar observa¬ 
+tions apply to interfaces. 
+
+4.4.3 Miscellaneous 
+
+• (32,45) Changing a signature has the combined ef¬ 
+fect of removing the old member and adding a new 
+one. 
+
+• (33) Adding or deleting a native modifier is con¬ 
+sidered compatible. The support for this is trivial. 
+Other changes related to native methods are beyond 
+the scope of the JLS. 
+
+• (30,31,43) Adding a field/method is a compatible 
+change, except in the following cases. 
+
+1. The new field/method shadows/overrides an 
+old one, and the new field/method is less ac¬ 
+cessible than the old one. 
+
+
+Manager’s ctable 
+
+
+Tom.eat -> 0 
+
+
+
+Tom.hack -> 1 
+
+
+Jerry .eat -> 2 
+
+
+Jerry .hack -> 3 
+
+
+Jerry .study -> 4 
+
+
+
+Figure 6: The ctable and offset table of Manager 
+
+2. The new field/method shadows/overrides an 
+old one, and the new field/method is a static 
+(instance) member but the old one is an in¬ 
+stance (static) member. 
+
+3. The new field in an interface may shadow a 
+field in other classes. 
+
+These cases are handled as (25), (27) and (26). 
+
+• (44) Adding methods to interfaces is listed as a 
+binary compatible change in the JLS. However, it 
+MAY break compatibility with pre-existing bina¬ 
+ries [8], Based on our support for interfaces in Sec¬ 
+tion 4.3, together with the technique described for 
+(28), we can build the itable of an interface with 
+pointers to specific exception code. If a class which 
+implements the interface does not define all the in¬ 
+terface methods, the exception code is inherited. 
+
+5 Example Revisited: Programmer & 
+Manager 
+
+In our solution, the class Manager is compiled to contain 
+a ctable and an offset table (Figure 6). The ctable maps 
+distinct external methods used in the class to unique off¬ 
+sets. The offset table is initially empty, and is filled in 
+incrementally at run time with the offsets of these exter¬ 
+nal methods. 
+
+5.1 Scenario A Revisited: Adding a Method 
+
+In Scenario A we added a new method sleep at the very 
+beginning of Programmer. Our solution does not re¬ 
+quire recompilation of Manager, because Manager does 
+not make any assumptions about the vtable layouts of 
+Programmer and JavaProgrammer. 
+
+Figure 7 illustrates what happens during the class load¬ 
+ing of Programmer and JavaProgrammer. When 
+Programmer is being loaded, its vtable is constructed 
+on the fly so that any binary changes before class loading 
+can be taken into account. The layout of this newly con¬ 
+structed vtable is registered in the global allocation table 
+
+
+
+
+
+loaded class cache ctable list 
+
+
+Manager 
+
+
+global allocation t; 
+Manager 
+
+
+Manager’s data and code area 
+
+
+ctable offtab 
+
+vtable _1 
+
+Tom.eat -> 0 
+
+
+
+- 
+
+| EXN | 
+
+~ED 
+
+-ED 
+
+Tom.hack -> 1 
+
+
+- 
+
+Jerry .eat -> 2 
+
+
+- 
+
+Jerry .hack -> 3 
+
+
+
+Jerry .study -> 4 
+
+
+
+
+
+
+loaded class cache ctable list 
+
+
+Manager 
+
+
+Manager’s data and code area 
+
+
+ctable off_tab vtable _J 
+
+Tom.eat -> 0 
+
+
+- 
+
+|EXN| 
+
+-ED 
+
+-ED 
+
+Tom.hack -> 1 
+
+
+- 
+
+Jerry.eat -> 2 
+
+
+- 
+
+Jerry.hack -> 3 
+
+
+
+Jerry .study -> 4 
+
+
+
+
+
+global allocation table 
+Manager - -1 - 
+
+
+Loading Programmer 
+
+
+Loading Programmer 
+
+
+
+loaded class cache ctable list 
+
+
+
+
+Loading JavaProgrammer 
+
+
+
+Manager 
+
+Programmer 
+
+
+- Manager 
+Programmer 
+
+
+global allocation table 
+Manager 
+
+
+Manager’s data and code area 
+
+
+Programmer... 
+
+
+off_tab vtable 
+
+
+Tom.eat -> 0 
+
+0 
+
+Tom.hack -> 1 
+
+1 
+
+Jerry.eat -> 2 
+
+
+Jerry.hack -> 3 
+
+
+Jerry.study -> 4 
+
+
+
+
+loaded class cache ctable list 
+
+
+
+Manager 
+
+Programmer 
+
+I 
+
+JavaProgrammer 
+
+
+Manager 
+
+
+Programmer 
+
+
+global allocation table 
+
+
+Manager 
+
+
+Programmer 
+
+
+JavaProgrammer JavaProgrammetj 
+
+
+Manager’s data and code area 
+ctable off_tab vtable 
+
+
+Tom.eat -> 0 
+
+0 
+
+Tom.hack -> 1 
+
+1 
+
+Jerry.eat -> 2 
+
+tuti 
+
+Jerry.hack -> 3 
+
+i 
+
+Jerry.study -> 4 
+
+3 
+
+
+
+JavaProgrammer.. 
+
+
+1 vtable 
+
+
+
+0 - 
+
+* Iexn 1 
+
+
+1 - 
+
+-*■1 hack | 
+
+
+2 - 
+
+1 eat | 
+
+
+3 - 
+
+- I study 
+
+
+Figure 7: Scenario A revisited: adding a method. 
+
+entry of Programmer. This layout information is used 
+to fill in the relevant offset table entries of Manager. 
+
+When JavaProgrammer is loaded later (being a sub¬ 
+class of Programmer, its loading cannot precede that 
+of Programmer), its vtable is constructed following the 
+layout requirements specified by the global allocation 
+table entry of Programmer. By doing this, the consis¬ 
+tency of the vtable layouts between a subclass and its 
+superclass is maintained. Once this is done, the layout 
+information is propagated accordingly to the offset ta¬ 
+ble entries of Manager. Using the offset specified in the 
+corresponding offset table entry, a virtual method invo¬ 
+cation will successfully get through. 
+
+
+Figure 8: Scenario B revisited: removing a method. 
+
+5.2 Scenario B Revisited: Removing a Method 
+
+In Scenario B, we removed the method eat from class 
+Programmer. Although this is an incompatible change, 
+the program is still supposed to run as long as the re¬ 
+moved method is not invoked. In class Manager, if we 
+execute a method invocation Jerry.eat, the program 
+will execute as usual. However, if we execute Tom. eat, 
+an exception should be raised. 
+
+In our solution (Figure 8), after class Programmer is 
+loaded, there would be no information about method 
+eat in the global allocation table. However in Manager, 
+which expected a method eat from class Programmer, 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+there is an offset table entry which expects an offset 
+for method eat. In this case we put 0 in the offset ta¬ 
+ble entry. In the actual vtable of any class, the entry 
+at offset 0 is always set to point to some specific code 
+that would raise proper exceptions when invoking the 
+Tom. eat method at run time. However, things will be as 
+usual if Jerry. eat is executed, because eat does occur 
+in the global allocation table entry of JavaProgrammer. 
+
+5.3 Scenario C Revisited: Binary Change at 
+Run Time 
+
+Our solution works even if binary changes happen at 
+run time (Figure 9). Here we illustrate why this is true 
+using the example in scenario C, in which we changed 
+the class hierarchy compatibly by inserting a new class. 
+In scenario C, after class Manager is loaded and be¬ 
+ing executed, we add a new class OOProgrammer into 
+the old class hierarchy. When object Tom is being cre¬ 
+ated, class Programmer is loaded. Then, when object 
+Jerry is being created, both class OOProgrammer and 
+class JavaProgrammer are loaded. The vtable layouts 
+of Programmer, OOProgrammer and JavaProgrammer 
+are determined during class loading. All of this infor¬ 
+mation is registered in the global allocation table. Us¬ 
+ing this information, the offset table of Manager is filled 
+in incrementally. Eventually, the virtual method invoca¬ 
+tions will get through. 
+
+
+6 Algorithm 
+
+We have separately talked about how to support various 
+binary compatibility issues in Section 4. In this section, 
+we take a different view and present roughly the overall 
+algorithm of our solution. The algorithm consists of two 
+parts: the compiler part and the class loader part. 
+
+6.1 Compiler 
+
+To support binary compatibility, the major difference 
+in the compilation is that the metadata structures (e.g. 
+vtable, itable, field record, etc) of classes and interfaces 
+are not fixed. 
+
+
+1. Create ctable and offset table for every class be¬ 
+ing compiled. The ctable maps external references 
+(including references to various kinds of members) 
+to unique offsets to the offset table. The offset ta¬ 
+ble entries are tagged with the expected modifiers 
+of the members. The contents of the offset table 
+entries are blank. They are to be filled in incremen¬ 
+tally at run time when the corresponding class is 
+
+
+
+Loading Programmer 
+
+
+
+hack -> 
+
+
+Loading OOProgrammer 
+
+
+loaded class cache ctable list 
+
+
+Manager 
+
+Programmer | 
+
+I 
+
+OOProgrammer 
+
+
+- - Manager 
+Programmer 
+OOProgrammer 
+
+
+A global allocation table 
+
+
+
+Manager 
+
+J I 
+
+eat -> 1 
+
+
+Programmer 
+
+
+hack -> 2 
+
+
+
+
+
+Manager’s data and code area 
+ctable off_tab vtable ,_ 
+
+
+Tom.eat -> 0 
+
+1 
+
+Tom.hack -> 1 
+
+2 
+
+Jerry.eat -> 2 
+
+
+Jerry.hack -> 3 
+
+
+Jerry.study -> 4 
+
+
+
+
+
+
+OOProgrammer 
+
+
+
+vtable 
+
+0 - 
+
+Hexn 1 
+
+
+1 - 
+
+1 eat | 
+
+
+2 - 
+
+| hack | 
+
+
+3 - 
+
+| drink | 
+
+
+Loading JavaProgrammer 
+
+
+loaded class cache ctable list 
+- Manager 
+
+
+Manager 
+
+Programmer] 
+
+I 
+
+OOProgrammer 
+
+I 
+
+JavaProgrammer 
+
+
+Programmer 
+
+OOProgrammer 
+
+
+f global allocation table 
+
+
+
+Manager 
+
+J 1 i-7 
+
+eat -> 1 
+
+
+Programmer 
+
+_l r*j drink -> 3| 
+
+hack -> 2 
+
+- 
+
+OOProgrammer - 
+
+_1 
+
+
+
+JavaProgrammer 
+
+
+
+
+
+
+
+
+Manager’s data and code ardJrogrammer ... OOProgrammer ... JavaProgrammer 
+ctable 
+
+
+Tom.eat -> 0 
+Tom.hack -> 1 
+
+
+Jerry .eat -> 2 
+Jerry.hack -> 3 
+Jerry .study -> 4| 
+
+
+vtable 
+
+F¥ 
+
+
+
+vtable 
+
+fo 
+
+
+4 -U- 1 study | 
+
+
+Figure 9: Scenario C revisited: changing class hierarchy. 
+
+loaded. It is guaranteed that an offset table entry 
+will be filled in before it is used, because no access 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+to a class can be made before the class is loaded. 
+
+2. Compiling external references. Accesses to exter¬ 
+nal references are compiled to go through the offset 
+table. The object code fetches an offset from the 
+offset table, and uses it to access the corresponding 
+metadata structure. 
+
+Taking virtual method invocation as an example, 
+if an object o is of static class X, then a virtual 
+method invocation o.m() that appears inside class 
+C would be compiled as follows (where the final o 
+is the self pointer): 
+
+let off_m = lookup(ctable, "X", "m") 
+in o.vtable [off_tab[off_m]] (o) 
+
+Here ctable is the ctable of class C, off _tab is 
+the offset table of class C. Class C ’s ctable entry 
+for the virtual method m of class X is fixed. The 
+lookup can be performed at compile time, so that 
+at run time we can fetch the vtable offset directly 
+from a certain offset table entry. 
+
+6.2 Class Loader 
+
+The class loader needs to maintain the related data struc¬ 
+tures such as the global allocation table, offset tables, 
+and metadata structures like the vtable. It also has to 
+check for various constraints during class loading. Here 
+is what happens when a class C is loaded by the class 
+loader. Loading interfaces is handled similarly. 
+
+1. Loading superclasses. Recursively load all the su¬ 
+perclasses of C, if they are not loaded already. 
+
+2. Check for constraints related to the class hierarchy. 
+In this step we only need to check things related to 
+class C. Refer to Section 4.4.1 for details. 
+
+3. Create a global allocation table entry for class C 
+(T c ). This T c maps every member to its position in¬ 
+formation in the corresponding metadata structure 
+(e.g. vtable), together with the modifier tags. Static 
+members are easy to deal with, but special attention 
+must be paid when mapping instance members, be¬ 
+cause we have to do it in such a way that it is consis¬ 
+tent with the global allocation table entries of C’s 
+superclasses. 
+
+In order to do this, we have to check the global al¬ 
+location table entries of all the superclasses of C 
+(recursively, they are already consistent with each 
+other). Note that this data is not copied from the 
+global allocation table entries of C's superclasses 
+to the entry of C, because that would be space- 
+inefficient. This is also when we make sure final 
+
+
+methods are not overridden. After that, we con¬ 
+struct the mappings of C's fresh instance members 
+(those members defined in C but not in any super¬ 
+classes of C). Here we can only use those offsets 
+which are not yet used in any superclasses of C. In 
+particular some offsets (e.g. 0) are reserved for in¬ 
+compatible change exception handling and cannot 
+be used to map members to. 
+
+4. Create the class data structures (e.g. vtable) of 
+class C. We do this according to the layout spec¬ 
+ified in the global allocation table entry C and the 
+entries of C's superclasses. If the global allocation 
+table maps a member to position k, then the data for 
+the actual member is put at position k of the corre¬ 
+sponding data structure. Beside those specified by 
+the global allocation table, we also need to fill in 
+the reserved entries with pointers to particular ex¬ 
+ception code. 
+
+5. Fill in currently loaded classes’ offset table entries 
+that correspond to the members in C. We do this 
+with the help of the global allocation table entries 
+of C and its superclasses. This step is done by it¬ 
+erating over the ctable list. An inverse ctable list 
+would probably help to improve efficiency. 
+
+Here we may find out that other classes might be 
+expecting a non-existent member from C, or the ex¬ 
+pected access is not granted by comparing the mod¬ 
+ifier tags. In these cases we put offsets of exception 
+code (e.g. 0) in the offset tables of those classes. 
+However, as we discussed in Section 4.2, removed 
+fields cannot be handled in the same manner. We 
+raise an exception immediately when trying to fill 
+in the offset table entry for that removed field. 
+
+6. Fill in the offset table of class C. This is done in the 
+same manner as the last step. For C's offset table, 
+we fill in those entries that correspond to members 
+expected from the loaded classes. The entries for 
+members expected from not-yet-loaded classes are 
+left to be filled in later. 
+
+7. Add the information of class C to the loaded class 
+cache. Also add the class hierarchy constraints de¬ 
+manded by class C to the set of constraints main¬ 
+tained by the system. 
+
+8. Extend the ctable list with a pointer to the ctable of 
+class C. 
+
+
+
+movl _ZN4java41ang6System3outE, 
+
+*/,eax ; object 
+
+movl (*/,eax) , */,edx 
+
+;vtable 
+
+movl '/.eax, (*/,esp) 
+
+;this 
+
+movl _CD_C+4, */,eax 
+
+;argument 
+
+movl */,eax, 4(*/,esp) 
+
+
+call *116('/,edx) 
+
+
+
+direct dispatch (vtable) 
+
+movl _ZN4java41ang6System3outE, */,ecx 
+
+; object 
+
+movl _CD_C+4, */,eax 
+
+;argument 
+
+movl C/,ecx) , */,edx 
+
+;vtable 
+
+movl '/,ecx, C/,esp) 
+
+;this 
+
+movl '/,eax, 4(*/,esp) 
+
+
+movl otable+4, */,eax 
+
+; offset 
+
+call * ('/,eax, */,edx) 
+
+
+
+indirect dispatch (offset table) 
+
+
+Figure 10: Sample method invocation code 
+
+7 Implementation and Performance Eval¬ 
+uation 
+
+
+For ease of presentation, we have used vtable entry num¬ 
+bers in the offset table entries in the examples. In an ac¬ 
+tual implementation, a “processed offset” can be used in¬ 
+stead. This “processed offset” is the vtable entry number 
+multiplied by the size of a vtable entry (size of a pointer 
+to code). Thus we transferred some of the burden from 
+run time to compile time. 
+
+Bryce McKinlay implemented part of our solution for 
+GCJ. His implementation so far provides full support for 
+virtual methods and partial support for interface meth¬ 
+ods. The support for fields is still work in progress. This 
+implementation is to be included in the future GCC re¬ 
+lease 3.1. 
+
+When compiling with the -02 optimization flag, it turns 
+out that our new scheme generates one more assembly 
+instruction for each virtual method invocation. Figure 10 
+shows the result of compiling a virtual method invoca¬ 
+tion. In our indirect dispatch scheme with the offset ta¬ 
+ble involved, the code fetches the offset from the cor¬ 
+responding offset table (otable) entry, and adds it to 
+the vtable pointer before calling the method. In contrast, 
+the original direct vtable dispatch scheme generates code 
+which adds the offset of the method to the vtable pointer 
+and calls it. When the same call occurs in a loop (or in 
+succession), the compiler moves the otable load out of 
+the loop, so the overhead is reduced. 
+
+Our tests are based on the Java Grande 2.0 bench¬ 
+marks [9] (the current version of GCJ cannot compile the 
+SPECjvm98 benchmark suite). All results were obtained 
+
+
+Benchmark 
+
+Direct 
+
+Indirect 
+
+Unit 
+
+Ratio (%) 
+
+Samednstance 
+
+34.59 
+
+34.84 
+
+ns/call 
+
+99.27 
+
+Other:Instance 
+
+38.55 
+
+37.29 
+
+ns/call 
+
+103.39 
+
+Crypt (A) 
+
+7.26 
+
+7.27 
+
+s 
+
+99.82 
+
+HeapSort (A) 
+
+2.14 
+
+2.15 
+
+s 
+
+99.67 
+
+Series (A) 
+
+46.90 
+
+47.62 
+
+s 
+
+98.49 
+
+Crypt (B) 
+
+48.41 
+
+48.49 
+
+s 
+
+99.82 
+
+HeapSort (B) 
+
+14.69 
+
+14.67 
+
+s 
+
+100.14 
+
+Series (B) 
+
+485.87 
+
+493.12 
+
+s 
+
+98.53 
+
+AlphaBeta 
+
+24.76 
+
+25.04 
+
+s 
+
+98.89 
+
+MonteCarlo 
+
+32.89 
+
+32.64 
+
+s 
+
+100.77 
+
+Euler 
+
+327.55 
+
+328.65 
+
+s 
+
+99.66 
+
+Ray Tracer 
+
+45.21 
+
+44.81 
+
+s 
+
+100.90 
+
+MolDyn 
+
+518.09 
+
+529.13 
+
+s 
+
+97.91 
+
+
+Table 3: Java Grande 2.0 benchmarks 
+
+on a DELL Precision 410 workstation running Red Hat 
+Linux 7.1. The machine has 512MB of main mem¬ 
+ory and 500MHz Pentium III processor with 512KB of 
+cache. The average results over 3 rounds of tests, us¬ 
+ing dynamic linking with -02 flag turned on for both 
+the direct vtable dispatch scheme of GCJ (Direct) and 
+our indirect offset table dispatch scheme (Indirect), are 
+shown in Table 3. In the “Ratio (%)” column, numbers 
+less than 100 indicate performance slowdown using our 
+scheme, while numbers greater than 100 indicate perfor¬ 
+mance speedup. 
+
+The first two benchmarks are taken from benchmark 
+suite section 1 (Low Level Operations). They test the 
+performance of invoking virtual (instance) methods on 
+an object of the same class and of another class. These 
+two benchmarks perform a large number of iterations 
+over 17 method invocations; every invoked method sim¬ 
+ply increases a global static counter. The result indicates 
+that much of the offset table overhead was optimized 
+away in these cases. Somewhat surprisingly the perfor¬ 
+mance on “OtherTnstance” was improved, possibly due 
+to the different instruction scheduling. 
+
+The rest of the benchmarks (IDEA Encryption, Heap 
+Sort, Fourier Coefficient Analysis, Alpha Beta Search, 
+Monte Carlo Simulation, Computational Fluid Dynam¬ 
+ics, 3D Ray Tracer, and Molecular Dynamics Simula¬ 
+tion) are chosen from Sections 2 (Kernel) and 3 (Large 
+Scale Applications) of the benchmark suite. We chose 
+those with the most method invocations involved. Some 
+of them are run on different data sizes (A/B). The per¬ 
+formance penalty is on average less than 2%. Again we 
+see some performance speedup in the test cases. 
+
+Another interesting observation is on the size of the ob- 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ject files. The new indirect dispatch scheme for binary 
+compatibility puts extra offset tables in the object files. 
+However, the vtables are no longer needed. When test¬ 
+ing with the Java Grande 2.0 benchmarks, it turned out 
+that the object file size using the new scheme is on av¬ 
+erage 1% less than using the standard vtable dispatch 
+scheme. 
+
+
+8 Related Work 
+
+Joisha et al. [16] use an indirection table to enable effi¬ 
+cient sharing of executable code for the IBM Quicksilver 
+quasi-static compiler [27]. Besides increasing reusabil¬ 
+ity of binary code, their solution also provides some sup¬ 
+port for binary compatibility. When binary changes (es¬ 
+pecial compatible ones) to a class C are detected during 
+class loading, the class C is recompiled without requir¬ 
+ing any changes to the loaded client classes of C, because 
+all stitching (or linking operations) are performed on the 
+indirection table. This stitching, or the operation which 
+fills in the indirection table, happens incrementally the 
+first time any single entry is used during the execution 
+of the program. To enable this operation, they use some 
+special offsets to trigger “traps” in the OS. When the 
+program tries to access the memory using these offsets, 
+the trap handler takes care of filling in the indirection 
+table entry and resuming the program execution. Since 
+the major concern of their paper is the sharing of code 
+images, they do not explicitly address the handling of 
+various binary incompatible changes. 
+
+In contrast, our solution does not require using any 
+dynamic compilation techniques. Unlike the approach 
+taken by Joisha el al., we handle the problem of binary 
+compatibility by building vtables and other class data 
+structures not during compilation but during class load¬ 
+ing. A global allocation table is introduced to help main¬ 
+tain the consistency of table layout between superclasses 
+and subclasses. We also introduce an offset table for ev¬ 
+ery class. These offset tables are filled in with the help of 
+the global allocation table during class loading as soon 
+as the referenced class is loaded. The statically compiled 
+code (e.g. for method invocation) uses the offset tables to 
+access the corresponding class data structures (e.g. vta¬ 
+bles). Due to the observation that an external reference 
+cannot be executed before the referenced class is loaded, 
+going through the offset tables is guaranteed to be safe. 
+Thus our approach does not rely on OS-dependent trap¬ 
+ping mechanisms to trigger the linking process at run¬ 
+time. However, similar trapping mechanisms can be 
+used to handle missing fields in cases when full com¬ 
+pliance with the JLS is important. Lastly, because we 
+fill in all related offset table entries during the loading 
+
+
+of a class, we can check for various binary incompat¬ 
+ible changes. Our paper presents a detailed discussion 
+of all the binary changes, including both compatible and 
+incompatible, defined by the JLS. 
+
+
+9 Conclusion 
+
+We have presented a scheme which uses static compi¬ 
+lation to support Java binary compatibility. All of the 
+binary compatibility requirements in the Java Language 
+Specification are supported with the same set of sim¬ 
+ple techniques. Binaries changed in a compatible man¬ 
+ner can link successfully with pre-existing binaries that 
+previously linked without error. Incompatible changes 
+raise various run-time exceptions accordingly. Our im¬ 
+plementation shows that this approach is fairly efficient 
+and has the potential of being applied to real systems. 
+
+
+10 Acknowledgments 
+
+We want to specially thank Bryce McKinlay for imple¬ 
+menting the indirect dispatching scheme for GCJ and his 
+inspiring discussion on related issues, and Manish Gupta 
+for keeping us informed about the state-of-the-art in dy¬ 
+namic Java compilers. We also thank many posters on 
+the GCJ mailing list (java@gcc.gnu.org) for answering 
+our questions about the GCJ internals, Greg Collins and 
+Andrew McCreight for valuable comments on an early 
+version of our paper, and the anonymous reviewers. 
+
+References 
+
+[1] B. Alpern, C. R. Attanasio, J. J. Barton, M. G. Burke, 
+P. Cheng, J.-D. Choi, A. Cocchi, S. J. Fink, D. Grove, 
+M. Hind, S. F. Hummel, D. Lieber, V. Litvinov, M. F. 
+Mergen, T. Ngo, J. R. Russell, V. Sarkar, M. J. Serrano, 
+J. C. Shepherd, S. E. Smith, V. C. Sreedhar, H. Srini- 
+vasan, and J. Whaley. The Jalapeno virtual machine. IBM 
+System Journal , 39(1), February 2000. 
+
+[2] B. Alpern, A. Cocchi, S. Fink, D. Grove, and D. Lieber. 
+Efficient implementation of Java interfaces: Invokeinter- 
+face considered harmless. In Proc. 2001 ACM SIGPLAN 
+Conference on Object-Oriented Programming Systems, 
+Languages and Applications, pages 108-124, 2001. 
+
+[3] P. Bothner. A GCC-based Java implementation. In IEEE 
+Compcon 1997 Proceedings, pages 174-178, February 
+1997. 
+
+[4] D. Chambers, C. Dean, J. Grove. Whole-program opti¬ 
+mization of object-oriented languages. Technical Report 
+TR-96-06-02. Dept, of Computer Science and Engineer¬ 
+ing, University of Washington, 28, 1997. 
+
+
+
+[5] D. Chase, R. Hoover, and K. Zadeck. BulletTrain tech¬ 
+nology white paper, http://www.naturalbridge. 
+com/. 2001. 
+
+[6] D. Detlefs and O. Agesen. Inlining of virtual methods. 
+In ECOOP’99, LNCS 1628, pages 258-278, 1999. 
+
+[7] O. P. Doederlein. The Java performance report - part 
+IV (static compilers), http://www.javalobby.org/ 
+members/jpr/, August 2001. 
+
+[8] S. Drossopoulou, D. Wragg, and S. Eisenbach. What 
+is Java binary compatibility? ACM SIGPLAN Notices, 
+33(101:341-358, 1998. 
+
+[9] Edinburgh Parallel Computing Centre, The Java Grande 
+forum benchmark suite, http://www.epcc.ed.ac. 
+uk/javagrande/. 2001. 
+
+[10] I. R. Forman, M. H. Conner, S. H. Danforth, and L. K. 
+Raper. Release-to-release binary compatibility in SOM. 
+In Proc. 1995 ACM SIGPLAN Conference on Object- 
+Oriented Programming, Systems, Languages and Appli¬ 
+cations, pages 426-438, Oct. 1995. 
+
+[11] J. Gosling, B. Joy, G. Steele, and G. Bracha. The 
+Java Language Specification (Second Edition). Addison- 
+Wesley, 2000. 
+
+[12] IBM Corporation. IBM’s system object model (SOM): 
+Making reuse a reality. First Class, a bimonthly publica¬ 
+tion of the Object Management Group, October 1994. 
+
+[13] IBM Corporation. IBM VisualAge for Java, http:// 
+www.software.ibm.com/ad/vajava/, 1998. 
+
+[14] Instantiations, Inc. Jove, optimizing native compiler for 
+Java technology, http: //www. instantiations . com/ 
+jove/product/thejovesystem.htm, 2000. 
+
+[15] K. Ishizaki, M. Kawahito, T. Yasue, H. Komatsu, and 
+T. Nakatani. A study of devirtualization techniques 
+for Java Just-In-Time compiler. In Proc. 2000 ACM 
+SIGPLAN Conference on Object-Oriented Programming 
+Systems, Languages and Applications, 2000. 
+
+[16] P. G. Joisha, S. P. Midkiff, M. J. Serrano, and M. Gupta. 
+A framework for efficient reuse of binary code in Java. In 
+Proc. 15th ACM International Conference on Supercom¬ 
+puting, pages 440-453. New York, June 2001. 
+
+[17] A. Krall and R. Grafl. CACAO — A 64-bit JavaVM just- 
+in-time compiler. Concurrency: Practice and Experi¬ 
+ence, 9(11): 1017-1030, 1997. 
+
+[18] C. League, V. Trifonov, and Z. Shao. Type-preserving 
+compilation of featherweight Java. In Proc. 8th Founda¬ 
+tions of Object-Oriented Languages Workshop, London, 
+January 2001. 
+
+[19] T. Lindholm and F. Yellin. The Java Virtual Machine 
+Specification (Second Edition). Addison-Wesley, 1999. 
+
+[20] V. Mikheev, N. Lipski, D. Gurchenkov, P. Pavlov, 
+V. Sukharev, A. Markov, S. Kuksenko, S. Fedoseev, 
+D. Leskov, A. Yeryomin, and A. P. Ershov. Overview 
+of Excelsior JET, a high performance alternative to Java 
+Virtual Machines. In Proc. 2002 ACM Workshop on Soft¬ 
+ware and Performance, 2002. 
+
+
+[21] G. Morrisett, D. Walker, K. Crary, and N. Glew. From 
+system F to typed assembly language. In Proc. 25th 
+ACM SIGPLAN-S1GACT Symposium on Principles of 
+Programming Languages, pages 85-97, Jan. 1998. 
+
+[22] NaturalBridge, Inc. BulletTrain optimizing com¬ 
+piler and runtime for JVM bytecodes, http://www. 
+naturalbridge.com/, 1996. 
+
+[23] G. C. Necula and P. Lee. The design and implementation 
+of a certifying compiler. In Proc. 1998 ACM SIGPLAN 
+Conference on Programming Language Design and Im¬ 
+plementation, pages 333-344, 1998. 
+
+[24] H. Ogawa, K. Shimura, S. Matsuoka, F. Maruyama, 
+Y. Sohda, and Y. Kimura. OpenJIT: an open- 
+ended.reflective JIT compiler framework for Java. In 
+14th European Conference on Object-Oriented Program¬ 
+ming, pages 362-387, 2000. 
+
+[25] M. Paleczny, C. Vick, and C. Click. The Java HotSpot™ 
+server compiler. In Proceedings of the 1st Java™ Virtual 
+Machine Research and Technology Symposium, 2001. 
+
+[26] P. Potrebic. What's the fragile base class (FBC) problem? 
+Be™ newsletter - the newsletter for BeOS™ developers 
+and customers. Issue 79, June 1997. 
+
+[27] M. J. Serrano, R. Bordawekar, S. P. Midkiff, and 
+M. Gupta. Quicksilver: a quasi-static compiler for Java. 
+In Proc. 2000 ACM SIGPLAN Conference on Object- 
+Oriented Programming, Systems, Languages and Appli¬ 
+cations, pages 66-82, Oct. 2000. 
+
+[28] K. Shudo. shuJIT—JIT compiler for Sun JVM/x86. 
+http://www.shudo.net/jit/, 1998. 
+
+[29] Sun Microsystems. The Java HotSpot virtual ma¬ 
+chine white paper, http://java.sun.com/products/ 
+hotspot/. 2001. 
+
+[30] Symbian Ltd. EPOC C++ system documentation - con¬ 
+trolling binary compatibility, http://www.symbian. 
+com/. 1999. 
+
+[31] The FLINT project. Binary compatibility report, 
+http://flint.cs.yale.edu/~dachuan/bincomp/ 
+main.ps.gz. 2001. 
+
+[32] The Free Software Foundation. The GNU compiler for 
+Java, http://gcc.gnu.org/java/, 2000. 
+
+
+

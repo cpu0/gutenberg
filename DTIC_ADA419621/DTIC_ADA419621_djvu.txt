@@ -1,0 +1,1847 @@
+i 
+
+
+Exploiting Method-Level Parallelism in Single-Threaded Java Programs 
+
+
+Michael K. Chen and Kunle Olukotun 
+Computer Systems Laboratory, Stanford University 
+Stanford, CA 94305-4070 
+http://www-hydra.stanfoid.edu/ 
+
+
+Abstract 
+
+Method speculation of object-oriented programs attempts 
+to exploit method-level parallelism (MLP) by executing sequen¬ 
+tial method invocations in parallel, while still maintaining cor¬ 
+rect sequential ordering of data dependencies and memory ac¬ 
+cesses. In this paper, we show why the Java virtual machine is an 
+effective environment for exploiting method-level parallelism, and 
+demonstrate how method speculation can potentially speed up 
+single-threaded, general purpose Java programs. Results from 
+our study show that significant speedups can be achieved on 
+data-parallel applications with minimal programmer and com¬ 
+piler effort. On control-flow dependent programs, moderate speed- 
+ups have been achieved, suggesting more significant performance 
+improvements on these types of programs may come from more 
+careful analysis or re-coding of the application. For both classes 
+of applications, we discover performance debugging drastically 
+improves speedups by eliminating or minimizing dependencies 
+that limit the effectiveness of method speculation. 
+
+
+1 Introduction 
+
+In this paper, we investigate the effectiveness of using method 
+speculation running on achip multiprocessor [12] to exploit method- 
+level parallelism (MLP) in single-threaded, general purpose Java 
+programs. Method speculation might be thought of as the next 
+logical step beyond current superscalar processors that exploit 
+instmction-level parallelism (CLP). As depicted in Rgure 1, methods 
+correspond to blocks of many instructions. Coarse grain parallelism 
+found between method blocks can potentially lead to speedups 
+not available to superscalar processors. Studies [18] [9] have 
+shown that instruction level parallelism (ILP) in superscalar 
+processors is ultimately bounded by the limited size of the instmction 
+window and control-flow dependencies. The lack of hardware for 
+effective memory disambiguation also limits the parallelism 
+available to these processors. Even with large instmction windows, 
+current superscalar processors are architecturally designed to 
+resolve dependencies between registers, not memory locations. 
+Likewise, bus-based multiprocessors may be good at exploiting 
+thread-level parallelism, but they are ineffective on loop-level and 
+method-level parallel tasks because of the relatively high cost of 
+communication. With a low-latency communication network and 
+
+
+method speculation support, a speculative chip multiprocessor 
+configuration can exploit levels of parallelism not available to 
+superscalar processors or traditional bus-based multiprocessors 
+[ 12 ]. 
+
+Currontrnicroprocessors [5] exploit instmction level parallelism 
+using out-of-order execution. The processor selects instmctions 
+from a large instmction window, speculatively executes these 
+instmctions out-of-order, and buffers the results in a reorder buffer. 
+The instmctions are then committed to the permanent architectural 
+state in the original program order. In the case of instmctions that 
+are incorrectly executed due to branch mispredictions or the use of 
+stale values, the processor must back up and restart execution. 
+
+Whereas the granularity of an entry in the reorder buffer of a 
+superscalar machine corresponds to a single instmction, such an 
+entry for a speculative multiprocessor analogously corresponds 
+to a single speculative task. In method speculation, sequential 
+method invocations are mapped to speculative tasks that are 
+executed in parallel with the in-order thread. When execution 
+reaches a method marked as speculative, the in-order thread 
+continues to execute that method, but forks off a new speculative 
+task that executes in parallel starting from the method return 
+(continuation). Speculative memory stores and register file writes 
+encountered during execution are buffered with each speculative 
+task. These changes are committed to the head, in-order thread 
+when sequential execution reaches the point at which the 
+speculative task wouldhave executed normally without speculation 
+
+
+bus-based multiprocessor 
+
+
+chip multiprocessor 
+
+
+thread 
+
+
+method J_ 
+
+
+g loop 
+
+
+Instruction 
+
+
+superscalar 
+-^- 
+
+
+S 
+
+
+number of instructions 
+
+
+Figure 1 - A single chip multiprocessor can exploit levels of 
+parallelism not available to traditional superscalar 
+processors or bus-based multiprocessors. 
+
+
+Copyright 1998 IEEE. Published in the Proceedings of PACT'98, 12-18 October 1998 in Paris, France. Personal use of this material is permitted. However, permission to 
+reprint/republish this material for advertising or promotional purposes or for creating new collective works for resale or redistribution to servers or lists, or to reuse any 
+copyrighted component of this work in other works, must be obtained from the IEEE. Contact: Manager, Copyrights and Permissions / IEEE Service Center / 445 Hoes Lane 
+/ P.O. Box 1331 / Piscataway, NJ 08855-1331, USA. Telephone; + Inti. 732-562-3966. 
+
+
+20040130 224 
+
+
+DISTRIBUTION STATEMENT A 
+Approved for Public Release 
+Distribution Unlimited 
+
+
+
+
+support. 
+
+To guarantee correct parallel execution of these speculative 
+tasks, our hardware ensures stores from earlier tasks are forwarded 
+to reads by later tasks. Because this special hardware guarantees 
+correct sequential ordering of memory references, we can forgo 
+any explicit synchronization that is usually required for correct 
+parallel execution on traditional parallel architectures. If a memory 
+read*after-write (RAW) violation occurs (caused by a preemptive 
+load by a later speculative task to a shared memory location written 
+late by an earlier speculative task), the speculative task is aborted 
+and restarted so that it can load the correct value from this memory 
+location. To restart a speculative task, buffered stores from the 
+aborted speculative task are discarded, and the register file and 
+program counter (PC) are restored to their state prior to the start of 
+speculative execution. 
+
+Franklin and Sohi first proposed the basis of hardware 
+speculation in the context of the Wisconsin Multiscalar project 
+[16] [3]. Their architecture is tailored more to speculating on 
+relatively fine-grained tasks. Our work is based on a speculation 
+model proposed for a chip multiprocessor, a design taigeted to 
+speculate on coarser-grained tasks [4]. Details of this design and 
+more careful analysis of assumptions are discussed in [4] and [ 14]. 
+
+We believe the Java language and virtual machine environment 
+can serve as a vehicle to explore capabilities of speculation in a real 
+system. Java will enable us to examine speculation performance 
+for object-oriented programs (OOP), create a clean execution model 
+for method speculation, and develop a realistic runtime system to 
+dynamically manage method speculation. 
+
+Results fix)m our study show that significant speedups can 
+be achieved through method speculation on data-parallel 
+applications vwth minimal programmer and compiler effort. On 
+control-flow dependent programs, moderate speedups have been 
+achieved, suggesting more significant performance improvements 
+on these types of programs may come from more careful analysis 
+or re-coding of the application. For both classes of applications, 
+we discovered performance debugging drastically improves 
+speedups by eliminating or minimizing dependencies that limit the 
+effectiveness of method speculation. 
+
+In Section 2, we describe our motivation for studying method 
+speculation under Java. The assumptions about the target 
+architecture and simulation methodology used to evaluate 
+speculation are discussed in Section 3. In Section 4, we describe 
+our benchmark suite, with the results of our study given in Section 
+5. Closing remaiks are made in Section 6, and future plans are 
+presented in Section 7. 
+
+2 Method Speculation of Java Programs 
+
+While this paper concentrates on using Java for method 
+speculation, it is important to briefly discuss why we believe a chip 
+multiprocessor architecture is an ideal platform for general, high- 
+performance Java computing. A chip multiprocessor architecture 
+supports low latency communication between processors [12]. 
+
+
+Such a parallel architecture is ideal for supporting many features of 
+the Java language and Java virtual machine: 
+
+• Explicit thread model and synchrorazation primitives in the Java 
+language allow the programmer to easily write programs to 
+exploit the underlying multiprocessor hardware. 
+
+• Low latency inter-processor communication can reduce the 
+oveiiiead for accessing locks in the virtual machine. Our evalu¬ 
+ations confirm Holzle et al,’s findings that show such overheads 
+can represent a significant Auction of overall execution time [7]. 
+
+• Virtual machine data stmctures shared between application 
+threads can be cached in the shared L2 cache, reducing access 
+latency to these system resources. 
+
+• The overheads of many coarse-grained virtual machine opera¬ 
+tions like class loading, bytecode verification, garbage collec¬ 
+tion and just-in-time (JIT) compilation could be hidden by ex¬ 
+ecuting them concurrently with actual application execution. 
+
+Many obvious levels of parallelism exist in the virtual machine. 
+Unfortunately, most of the coarse-grained parallelism present in 
+the virtual machine only represents single event parallelization 
+opportunities. As Amdahl’s Law tells us, the effects of speeding 
+up these phases of execution will have a smaller performance impact 
+on long mnning applications because most of the execution time 
+will be spent executing application code. While multithreaded 
+Java applications will clearly benefit fiiom a multiprocessor, method 
+speculation can provide the following additional advantages: 
+
+• Facilitates easy and straightforward parallelization. Modem 
+parallelizing compilers have been most successful with scien¬ 
+tific applications. For many classes of general applications, 
+though, these compilers fail because they cannot analyze non- 
+uniform memory accesses patterns and cannot resolve memory 
+pointer ambiguities. Without a compiler, significant program¬ 
+mer effort is required to explicitly hand-parallelize applications 
+using Java thread and synchronization primitives. Worst of all, 
+parallelization results in programs that are difficult to under¬ 
+stand. Method speculation is a simpler programming model 
+that can expose loop-level and method-level parallelism in the 
+application so that it can be exploited by the underlying hard¬ 
+ware. As we shall see, most programs can use method specu¬ 
+lation with little or no modification to the original application. 
+
+• Reduces parallelization oveiheads. Thread and synchroniza¬ 
+tion primitives generally introduce significant oveiheads into 
+the execution time not present in the sequential version of a 
+program. Method speculation can guarantee that dynamic ex¬ 
+ecution dependencies will always be correct, with smaller 
+overheads then those introduced by locks and barriers. With¬ 
+out these costly synchronization oveiheads, we can also ex¬ 
+pect to see speedups on finer grains of parallelism that would 
+not be possible using traditional parallelization methods. 
+
+• Can speed up control-flow limited programs that have very little 
+obvious parallelism. Programmers should be able to benefit 
+from the multiprocessor architecture even when running single- 
+threaded applications with very little fine- or coarse-grained 
+parallelism. 
+
+
+
+
+void main () { 
+
+
+Java will enable us to examine method speculation performance 
+for object-oriented programs (OOP), create a clean execution model 
+for method speculation, and develop a realistic runtime system to 
+dynamically manage method speculation. 
+
+Using procedure or ftinction calls as a fiumeworic to parallelize 
+programs was first mentioned by Knight in the context of Lisp [8]. 
+Oplinger et al. has also examined loop and procedural speculation 
+through a limit analysis based on C programs using an ideal 
+environment with many simplifying assumptions [13]. The focus 
+of their study was to show that general applications exhibit 
+significantamountsofloop-and procedural-level parallelism. Since 
+this paper is more concerned with implementing areal system, our 
+analysis will rely on more realistic assumptions given in Section 3. 
+
+2,1 Method Speculation on Object-Oriented 
+Programs 
+
+Object-oriented programs represent a class of applications 
+tiiat may behave differently from general C programs under method 
+(procedure) speculation. A study by Calder et al. shows the 
+characteristics of C and C++ programs to be significantly different 
+[2]. They show the dynamic function size of C programs to be four 
+times that of C++ programs, and the frequency of procedure calls 
+and returns in C++ to be three times that of C programs. These 
+findings support our understanding of how object-oriented 
+programs are written. The encapsulation model increases the 
+ficquency of small method calls, reducing the dynamic function 
+size and increasing the number of method calls and returns. 
+
+These characteristics suggest that method invocations can 
+efficiently expose loop- and method-level parallelism in object- 
+oriented programs. Method speculation uses the notion of 
+speculative tasks. When a method marked as speculative is 
+encountered, the current processor executes the method and a 
+forked speculative task executes in parallel starting fiom the method 
+return (continuation). This mapping of methods to speculative 
+tasks is depicted in Rgure 2. If the method call returns a value, the 
+speculative task executes assuming a predicted return value based 
+on previous executions of that method. If this predicted return 
+value turns out to be incorrect or there is a RAW violation in the 
+heap due to the ordering of field loads and stores between tasks 
+executing in parallel, then the speculative task must be terminated 
+and restarted. 
+
+Method speculation is most effective for frequently executed 
+methods that return void or a predictable return value. These 
+types of return values are frequently found in methods returning 
+boolean values that check for infrequent cases, but are not 
+crucial to the flow of program execution. A method call like 
+isValid () might do checks to make sure certain conditions are 
+met, returning true 95% of the time. Another example is a method 
+isEOF () that signals the presence of another value in the data 
+stream. This method will almost always return true when iterating 
+through a large data structure. 
+
+Method speculation can permit sequences of read only or 
+write only methods to execute in parallel without worrying about 
+
+
+
+Figure 2 - Mapping of methods to speculative methods. 
+RAW violations. Traditional loop-level parallelism can even be 
+exploited within our method speculation framework with minimal 
+programmer effort or with modem parallelizing compilers, as we 
+shall show later. 
+
+2.2 Mapping Speculation to Method 
+Invocations 
+
+Using method calls as the granularity of speculative tasks 
+conveniently allows us to exploit characteristics of the Java virtual 
+machine specification so that no transformations to the source 
+classfiles are required for speculative execution. In Oplinger et al.’s 
+study, static analysis of the C source programs was required to 
+convert a normal program into a single-program-multiple-data 
+program suitable for mnning on a speculative machine [13] [14]. 
+This analysis can be simplified considerably in Java. The Java 
+Virtual Machine Specification [10] states: 
+
+• A method can only access its private Java stack and locals, or 
+heap allocated objects. A callee method shares values from the 
+caller only through explicitly passed arguments using a copy¬ 
+ing, pass-by-value convention and a single return value. Argu¬ 
+ments and return values may include references to heap allo¬ 
+cated objects shared between the caller and callee. 
+
+• Specific Java bytecodes (get field, putfield, getstatic, 
+puts tatic, arrayload, and arraystore) make object (heap) 
+accesses explicit and distinct firom Java stack and local opera¬ 
+tions (load, store, push, pop, etc.). 
+
+These restrictions allow us to simplify our simulator by 
+eliminating Java stack and local accesses from our dependency 
+analysis. Since caller and callee methods work with their own 
+private Java stack and locals, RAW violations can only occur 
+between speculative tasks through objects dynamically allocated 
+in the heap. This simplified analysis is not possible with C programs 
+since the ability to manipulate pointers makes it impossible to 
+guarantee that heap and execution stack accesses are well-behaved 
+
+
+
+
+
+
+
+
+
+
+
+
+2.3 Dynamic Management of Method 
+Speculation 
+
+Previous performance results for speculation [13] assumed 
+optimally chosen method granularities taken from the dynamic 
+execution profile. Our simulations suggest that choosing the 
+appropriate methods formethod speculation can dramatically affect 
+performance gains. The Java virtual machine serves as an ideal 
+platform for investigation of a mntime profiling system that can 
+dynamically identify methods for method speculation from Java 
+bytecodes using some set of heuristics. 
+
+Our system would be similar to the runtime system of the 
+Hotspot Java virtual machine that uses dynamic method call 
+ftequencies to identify methods to compile just-in-time [7] [17]. 
+Relevant statistics collected during runtime would be fed back to 
+mark or unmaik methods to speculate on so that our system can 
+dynamically adapt to new data sets, or converge on an optimum 
+runtime configuration. Profile information collected during execution 
+could also be returned to the programmer and/or user to help 
+increase the effectiveness of speculation. 
+
+We have developed a basic profiling system used to help 
+identify methods to speculate on. An effective runtime profiling 
+system preserves a delicate balance between collecting the most 
+accurate and detailed data, and limiting the overhead data collection 
+incurs on overall execution time. Since our goal is to identify large 
+regions in the application program suitable for method speculation, 
+we do not insert our profile annotations on small methods, methods 
+returning unpredictable values (e.g. float, long and double), 
+and methods included in the j ava.* package. This reduced our 
+profile annotations to only methods that we expect could possibly 
+benefit from speculation. Data collected from annotations placed 
+on these methods are shown in Table 1. Simulations comparing 
+execution times indicate only minimal impact (< 1 %) on the overall 
+execution time firom these profiling annotations. While we expect 
+that in the future, profile data would be used in algorithms to 
+dynamically identify speculative methods, data collected from 
+profiling is only used as a heuristic in this study to statically identify 
+methods for speculation prior to execution. 
+
+
+3 Simulation Methodology 
+
+We use trace-driven simulations to evaluate the performance 
+of method speculation for Java programs. Annotated traces from 
+sequential execution of Java benchmarks running on a virtual 
+machine are fed into a simulator that models a speculative 
+multiprocessor. Although our trace-driven simulator does not 
+model low-level details of the speculation hardware and memory 
+system, it provides accurate estimates of the performance of method 
+speculation. 
+
+3.1 Choosing a Virtual Machine 
+
+For a performance critical application like a virtual machine, an 
+intrusive mechanism to generate traces would have skewed our 
+results. SimOS allows us to generate traces with no overhead 
+because it fully models the operating system and hardware units in 
+software [ 15]. SimOS has complete support for the MIPS ISA and 
+IRIX operating system, so our choice of virtual machines was 
+narrowed to the two virtual machines available for this platform: 
+the fieely available kaffe (ver. 0.9.2) [19], and the Sun JDKl. 1.3 port 
+to IRIX. Both of these virtual machines support just-in-time (JIT) 
+compilation and Sun’s JDKl.l APIs. We chose kaffe because we 
+could not obtain the full source code for Sun’s Java virtual machine 
+(JVM), and this study and fiituie work require modifications to the 
+virtual machine. 
+
+Only results for method speculation with the JTT compiler 
+enabled are presented for two reasons. We believe that speculation 
+is only useful to further enhance speedups achieved by proven 
+techniques like JTT compilation. Furthermore, our analysis has 
+shown that results from simulations based on inteipretive execution 
+do not accurately reflect the performance of method speculation 
+with jrr compilation, 
+
+3.2 Speculative Hardware Model 
+
+Hardware support for speculation makes it possible for the 
+chip multiprocessor to correctly resolve memory dependencies, 
+and to back-out of memory violations and restore the memory 
+system to a previous, known state. Our evaluation of method 
+speculation uses the underlying assumptions for a speculative 
+
+
+Annotation 
+
+Action 
+
+Purpose 
+
+Assembly 
+Instructions per 
+Method 
+
+Memory References 
+per Method 
+
+Fixed overhead 
+
+Load pointer to profile data 
+buffer 
+
+
+2 
+
+none 
+
+Dynamic access 
+counter 
+
+Count call frequency of given 
+method 
+
+Identify frequently executed methods 
+
+3 
+
+1 load, 1 store 
+
+Nested method 
+counter 
+
+Count number of nested methods 
+called from given method 
+
+Identify methods with elapsed execution times 
+suitable for speculation 
+
+6 + 1 * method 
+calls 
+
+2 loads, 2 stores 
+
+Loop counter 
+
+Counter numerber of backward 
+branches taken in given method 
+
+Identify methods with elapsed execution times 
+suitable for speculation or methods that can 
+be modified to run under speculation 
+
+4 + 1 * method 
+calls 
+
+1 load, 1 store 
+
+Prediction accurarcy 
+counter 
+
+Count number of mispredicted 
+return values 
+
+Identify methods that will not frequently cause 
+return value misprediction violations under 
+speculation 
+
+2 (correct) 
+
+6 (mispredict) 
+
+2 loads (correct) 
+
+2 loads, 2 stores 
+(mispredict) 
+
+
+Table 1 - Profile annotations used to identify suitable methods for speculation. 
+
+
+
+
+
+
+Operations 
+
+Overhead In 
+Cycles 
+
+Start speculative method 
+
+Create and save checkpoint of register file to memory, fork a free processor 
+that executes speculatively, load checkpoint into new processor. 
+
+~50 
+
+End speculative method 
+
+Commit speculative data, check actual return value against guess and restart 
+if necessary. 
+
+~50 
+
+RAW violation 
+
+Discard speculative data, reload checkpoint, restart speculative task 
+
+-50 
+
+
+liable 2 - Speculation overheads per speculative method. 
+
+
+chip multiprocessor [4] to define the high-level behavior of 
+speculative methods: 
+
+• The system has four single-issue, in-order MIPS R4000proces¬ 
+sors, permitting up to three speculative tasks to execute in par¬ 
+allel with the main thread. Future designs of the chip multipro¬ 
+cessor could potentially use out-of-order processors with higher 
+issue width, so that the system could exploit both ILP and MLP. 
+
+• New speculative tasks are created only from the most specula¬ 
+tive task, or from the in-order thread, if no speculative task 
+exists. Although not discussed here, our hardware can actually 
+support other models of speculation [4]. 
+
+• Memory store buffers can hold up to IkByte (256 words) of 
+writes to memory for each speculative task. 
+
+• A RAW memory violation forces a restart of the speculative 
+task on which the violation occurred and termination of specu¬ 
+lative tasks that occur sequentially after this task. This involves 
+flushing all the corresponding memory store buffers and restor¬ 
+ing the initial register state and PC of the speculative task that 
+caused the violation. 
+
+• The unit of coherency that RAW violations in memory are 
+detected is one word (4 bytes). Consequentially, byte accesses 
+in the same word could potentially cause false violations. 
+
+• A simple return value prediction scheme is implemented that 
+predicts using the last value returned for a given method [11]. 
+
+• Speculation overheads are incurred for starting new specula¬ 
+tive tasks and for restarting tasks due to RAW violations or 
+return value mispredictions [4]. These overheads are described 
+in detail in Table 2. 
+
+3.3 Trace-Driven Simulation 
+
+To simulate method speculation, we use kc^e mnning under 
+SimOS to generate an execution trace containing data relevant to 
+method speculation. Embra, the fastest but least detailed SimOS 
+CPU model, was used to minimize simulation time. The execution 
+trace is fed into a simulator that reconstmcts execution under method 
+speculation, with appropriate detection of RAW violations and 
+return value mispredictions. To generate this trace, we utilize the 
+annotation capabilities of SimOS and modified the native code 
+generated by the JIT compiler. 
+
+As described in Section 2.2, our execution model simplifies 
+data dependency analysis to heap object and array accesses be¬ 
+tween speculative methods. The execution trace only records these 
+heap accesses, which can be easily distinguished from Java stack 
+and local access. This eliminates the need to examine loads and 
+stores to non-heap allocated memoiy (e.g. execution stack ac¬ 
+cesses, constant loads, and method lookups) in the dynamically 
+
+
+generated code that cannot represent true dependencies between 
+speculative tasks. 
+
+This sparse trace is generated by modifying the JTT compiled 
+code generated by kaffe. Illegal instmctions, used as markers, are 
+added to the generated code immediately after loads and stores 
+associated with field accesses during JIT compilation. During 
+executionunderSimOS,these marker instmctions are trapped within 
+SimOS. Thetrappedinstmctionscallaroutinetologtoourexecu- 
+tion trace file the addresses of the memory locations accessed by 
+the real loads and stores. Because SimOS is a full software simula¬ 
+tion environment, we can force these marker instmctions to disap¬ 
+pear from simulated execution. Thus, the only side effect from our 
+annotation methodology is mild code expansion of the JIT com¬ 
+piled code during simulated execution. 
+
+The start and end of speculative methods are marked in a 
+similar fashion. Speculative methods are chosen statically prior to 
+execution using statistics collected fiom the basic profiling system 
+described in Section 2.3 and another program that takes dynamic 
+method calls fi-om the execution trace to generate a readable method 
+call graph with call frequencies and associated execution times. 
+Speculative methods are identified to the virtual machine by de¬ 
+noting one of the unused method attribute flags as the method 
+speculation flag. These attribute flags are normally used to iden¬ 
+tify certain characteristics of the method (e.g. private, static, 
+synchr oni z ed). Classfile binaries are modified prior to simula¬ 
+tion with the method speculation flag raised on methods that have 
+been chosen to be speculative. When our modified JVM encoun¬ 
+ters the speculation flag raised during JIT compilation of a given 
+method, the JIT compiler inserts assembly code to mark the begin¬ 
+ning and end of the speculative region. This code is used to 
+generate appropriate entries in the execution trace and to deter¬ 
+mine if the return value is correctly predicted. In a real system, the 
+JIT compiler would insert assembly code at these points to invoke 
+method speculation on the actual hardware. 
+
+Our initial simulation results were difficult to interpret because 
+we could not associate violation addresses that our simulator gen¬ 
+erated with actual variables in the program. This led us to develop 
+an extensive non-intrusive symbol facility under SimOS to aid in 
+performance debugging. This is more challenging than looking for 
+symbols in a standard program binary. Java symbols for method 
+calls and static fields from a classfile have to be resolved dynami¬ 
+cally to the corresponding addresses generated for these stmc- 
+tures at mntime. Addresses for new objects and arrays created 
+from program execution also have to be resolved to the corre¬ 
+sponding text symbol. SimOS annotations [6] set on stub func¬ 
+tions in kaffe are used to collect symbol and address information 
+during execution into a symbold file so that these dynamically 
+
+
+
+
+
+allocated objects can be identified. To simplify symbol resolution, 
+we also disable garbage collection so that objects are not relocated 
+during runtime. 
+
+Wtual machine support functions are eliminated from the 
+execution traces that we analyzed so that we can focus on the 
+behavior of the JU compiled application code under speculation. 
+In addition to disabling the garbage collector, methods are loaded 
+and compiled into the virtual machine in advance to avoid pauses 
+during program execution. Overheads from small functions to 
+implement new object allocations, lock operations and symbol 
+lookups are also removed from the traces. 
+
+The execution trace files are analyzed offline using our method 
+speculation simulator. The simulator reconstructs execution under 
+method speculation from the sequential execution trace with marked 
+speculative regions and object accesses. This trace-driven simu¬ 
+lator correctly handles RAW violations and return value 
+mispredictions. It also incorporates assumptions about the be¬ 
+havior of the underlying hardware described in Section 3.2. A 
+symbol resolver works in conjunction with the simulator, taking 
+information from the symbol file to associate dynamically allocated 
+objects with the appropriate text symbol. Using this system, 
+textual information can be produced to associate a violation ad¬ 
+dress with a specific object, and with the method and call nesting 
+from which the reference was made. 
+
+4 Benchmarks 
+
+Benchmaik selection was largely limited by the availability of 
+representative Java applications. In general, Java applications that 
+represent traditional benchmark-style programs with compute 
+intensive kernels and critical sections of code were difficult to 
+locate. To date, Java has been most successfiil as a high-level 
+development language used to implement user-interfaces. 
+Unfortunately, user-interactive programs are not amenable to 
+compute intensive benchmarking. We also included some small 
+kernels in our benchmarks, but we avoided toy benchmarks like 
+Caf f eineMarks that do not reflect the stmcture or behavior of 
+real Java programs. 
+
+The results in this paper are based on the benchmarks listed 
+in Table 3. StringBuf fer and Hashtable are frequently 
+encountered core Java libraries that can be sped up using method 
+speculation, idea and NeuralNet are two benchmarks taken 
+from the jBYTBmarksuite [l],andLir^ck^pisapopular floating¬ 
+point kernel. The remaining programs represent popular, full scale 
+applications. 
+
+5 Performance Results 
+
+The results of our simulations of method speculation on a 
+chip multiprocessor with four single-issue processors are shown 
+in Table 4. Speedups are measured relative to one single-issue 
+MIPS R4000 processor executing the benchmark. We show re¬ 
+sults with and without the speculation overheads (see Table 2) 
+
+
+included in the analyzed traces. Average utilization is also com¬ 
+puted, providing a measure of the occupancy on the available 
+processors. As we would expect, applications that fiiequently 
+abort large speculative regions due to memory RAW violations or 
+return value mispredictsion will have significantly higher proces¬ 
+sor utilization relative to the actual speedup achieved. 
+
+These results represent the best performance that was 
+achieved by varying which methods to speculate on. The pool of 
+suitable candidates for speculation were identified by our call graph 
+tool discussed in Section 3.3 and basic profiling system described 
+in Section 2.3. 
+
+5.1 Performance Analysis 
+
+Speedups appear to be split between the two types of appli¬ 
+cations represented in our benchmarks. Method speculation is 
+effective for speeding up data-parallel applications like idea, 
+NeuralNet, RayTrace and LinpackApp that have significant 
+coarse-grained parallelism. With very few data dependencies be¬ 
+tween speculative tasks, almost no memory violations are seen 
+during execution of these programs. 
+
+RayTrace is the only benchmark of these four that has little 
+HJP. Since NeuralNet, IDEA, and LinpackApp have significant 
+ILP, it could be argued that similar speedups on these programs 
+could be achieved on a superscalar processor. What is important 
+to note is that method speculation can achieve these speedups 
+without true compiler support. Most ITT compilers found in Java 
+virtual machines only translate bytecodes into native code, sacri¬ 
+ficing high-level optimizations that improve code quality in order 
+to keep compilation times short. Superscalar processors, unfortu¬ 
+nately, must rely on time consuming instruction scheduling and 
+optimizations from a good compiler to fully exploit ILP. We believe 
+this distinction can allow the speculative chip multiprocessor to 
+outperform a superscalar machine on these types of data-parallel 
+applications when only a simple JIT compiler is used. 
+
+Control-flow based programs, unfortunately, only benefit 
+modestly from method speculation. Speedups on these programs 
+do not exceed 1.4 on our chip multiprocessor with four CPUs. 
+Compared to data-parallel applications, they have significantly 
+higher violation and restart rates (see Table 4), reflecting the con¬ 
+trol and data dependent nature of these programs. Low processor 
+utilization numbers also indicate that speedup is limited due in part 
+
+
+name 
+
+binary 
+
+(bytes) 
+
+# methods 
+
+(static) 
+
+* classes 
+
+(static) 
+
+# methods 
+
+(dynamic) 
+
+description 
+
+QBSIBH 
+
+17507 
+
+19 
+
+4 
+
+3779 
+
+java.utiU-lashtable 
+
+
+18637 
+
+26 
+
+4 
+
+14051 
+
+encryptioiVdecryption [1] 
+
+
+64635 
+
+309 
+
+63 
+
+585648 
+
+Java assembler 
+
+
+117471 
+
+355 
+
+40 
+
+540034 
+
+yacc-like compiler 
+
+
+573120 
+
+1492 
+
+174 
+
+236357 
+
+Java compiler 
+
+javap 
+
+172505 
+
+259 
+
+38 
+
+295726 
+
+classfile disassembler 
+
+LinpackApp 
+
+5109 
+
+15 
+
+2 
+
+13190 
+
+Unpack FP kernel 
+
+
+
+33 
+
+4 
+
+97332 
+
+neural net simulation [1] 
+
+OROMatcher 
+
+
+202 
+
+20 
+
+96735 
+
+Peri 5 regexp 
+
+
+13319 
+
+53 
+
+6 
+
+1541478 
+
+raytrace of scene 
+
+StringBuffer 
+
+5906 
+
+36 
+
+2 
+
+4800 
+
+java.Iang.Stri ngBuffer 
+
+
+*NOTE: These statistics do not include calls to core JDK methods or classes. 
+
+
+Table 3 - Benchmark programs. 
+
+
+
+
+
+
+
+
+iMnchmark 
+
+•pMdup (with 
+
+speculation 
+
+overhead) 
+
+speedup (no 
+speculation 
+overhead) 
+
+average utilization 
+(on 4 CPUS) 
+
+violations (% of 
+speculative tasks) 
+
+restarts (% of 
+speculative tasks) 
+
+violation (% of 
+speculative cycfes) 
+
+restart (% of 
+speculative cycles) 
+
+average cycles / 
+speculative task 
+
+average cycles / 
+violation 
+
+average cycles / 
+restart 
+
+notes 
+
+Hashtable 
+
+(original) 
+
+1.59 
+
+1.69 
+
+2.54 
+
+50.1 
+
+0.0 
+
+55.0 
+
+0.0 
+
+2271 
+
+2490 
+
+0 
+
+frequent violations on Hashtable.count 
+
+Hashtable 
+
+(modified) 
+
+2.30 
+
+2.47 
+
+2.72 
+
+3.2 
+
+0.0 
+
+14.2 
+
+0.0 
+
+2348 
+
+10239 
+
+0 
+
+moved loop-carried dependency 
+
+DEA 
+
+(original) 
+
+iVa 
+
+r\/a 
+
+n/a 
+
+n(a 
+
+iVa 
+
+iVa 
+
+iVa 
+
+n/a 
+
+fVa 
+
+n/a 
+
+speculative tasks were too large, resiit'ng in store buffer overflow 
+
+DEA 
+
+(modified) 
+
+3.60 
+
+3.76 
+
+3.76 
+
+0.0 
+
+0.0 
+
+0.1 
+
+0.0 
+
+8164 
+
+52773 
+
+0 
+
+transformed loop bodies into methods 
+
+Jasmin 
+
+1.23 
+
+1.24 
+
+1.35 
+
+41.0 
+
+7.8 
+
+26.8 
+
+4.0 
+
+1663 
+
+1086 
+
+850 
+
+
+javac 
+
+1.15 
+
+1.15 
+
+1.68 
+
+29.9 
+
+4.4 
+
+59.6 
+
+18.1 
+
+23147 
+
+46097 
+
+96240 
+
+
+JavaCUP 
+
+1.23 
+
+1.23 
+
+1.57 
+
+16.1 
+
+12.4 
+
+33.1 
+
+25.8 
+
+2909 
+
+5958 
+
+6037 
+
+
+javap 
+
+1.29 
+
+1.29 
+
+1.84 
+
+38.9 
+
+3.5 
+
+62.8 
+
+2.5 
+
+5854 
+
+9456 
+
+4190 
+
+
+UnpackApp 
+
+2.04 
+
+2.09 
+
+2.21 
+
+4.7 
+
+1.9 
+
+2.8 
+
+6.7 
+
+5163 
+
+3071 
+
+18606 
+
+large sequential section reduces speedup from > 3 In the kernel 
+
+NeuralNet 
+
+(original) 
+
+1.61 
+
+1.55 
+
+2.18 
+
+54.5 
+
+0.0 
+
+53.2 
+
+0.0 
+
+27726 
+
+27059 
+
+0 
+
+violations concentrated on certain variables 
+
+NeuralNet 
+
+(modified) 
+
+2,82 
+
+3.10 
+
+3.11 
+
+0.2 
+
+0.0 
+
+0.7 
+
+0.0 
+
+2679 
+
+8361 
+
+0 
+
+transformed loop bodies into methods 
+
+OROMatcher 
+
+1.22 
+
+1.18 
+
+1.33 
+
+10.3 
+
+12.0 
+
+45.2 
+
+0.3 
+
+2427 
+
+10606 
+
+70 
+
+violations concentrated on certain variables 
+
+RayTrace 
+
+(original) 
+
+1.01 
+
+1.01 
+
+1.95 
+
+99.9 
+
+0.0 
+
+98.8 
+
+0.0 
+
+20408 
+
+20169 
+
+0 
+
+frequent violations on Point.x 
+
+RayTrace 
+
+(modified) 
+
+2.77 
+
+2.80 
+
+2.80 
+
+0.0 
+
+0.0 
+
+0.0 
+
+0.0 
+
+15745 
+
+0 
+
+0 
+
+eliminated false loop-carried dependency 
+
+StringBuffer 
+
+(original) 
+
+1.47 
+
+1.63 
+
+2.43 
+
+65.2 
+
+0.0 
+
+56.2 
+
+0.0 
+
+1709 
+
+1471 
+
+0 
+
+frequent violations on StringBuffer.count 
+
+StringBuffer 
+
+(modified) 
+
+2.14 
+
+2.46 
+
+2.68 
+
+7.8 
+
+0.0 
+
+13,6 
+
+0.0 
+
+1375 
+
+2420 
+
+0 
+
+moved loop-carried dependency 
+
+
+Table 4 - Performance results. 
+
+
+to the few available opportunities to use method speculation. A 
+cursory examination confirms that these applications have propor¬ 
+tionally fewer methods with void and predictable return values 
+than data-parallel programs. This suggests that with more time to 
+understand and modify the source code so that processor utiliza¬ 
+tion is increased, it may be possible to see better performance on 
+control-flow based programs. 
+
+We discovered that the size of methods chosen for specula¬ 
+tion plays an important role in performance and processor utiliza¬ 
+tion. Small speculative tasks are less likely to cause memory viola¬ 
+tions, but only produce small speedups. Two factors seem to 
+contribute to this phenomenon. Since small speculative regions 
+are short-lived, there is less opportunity to overlap speculative 
+tasks, resulting in low utilization of the processors. Secondly, small 
+speculative regions suffer a larger relative penalty from the fixed 
+speculation overheads. 
+
+In general, we found better results come from speculating on 
+larger speculative tasks. Large speculative regions execute longer, 
+so that there is a greater chance of having numerous speculative 
+methods executing concurrently. Unfortunately, large regions have 
+more memory references, increasing the amount of parallel, over¬ 
+lapping loads and stores to the execution heap. Large speculative 
+regions also tend to move memory references further apart in time 
+from dieir original positions in sequential execution. Consequently, 
+speculating on larger methods increases processor utilization, but 
+places a greater strain on the memory system and speculation 
+hardware. As expected, we found that choosing excessively large 
+speculative regions results in speculation buffer overflows and 
+unacceptable rates of memory RAW violations. 
+
+Speedups never approach four, the number of processors in 
+our system, even for our data-parallel benchmarks. Our simple 
+scheduling algorithm bypasses speculative methods and executes 
+them sequentially when no more free processors are available, 
+resulting in idle g^s that limit speedup. This limitation is due to an 
+inefficiency in our current model for speculative methods in loops 
+
+
+that we believe will be remedied as we continue to develop our 
+system. 
+
+5,2 Modifying Source Code to Improve 
+
+Performance 
+
+We were disappointed with our initial results on unmodified 
+source code. We found low processor utilization numbers for our 
+data-parallel benchmarks and fiequent memory violations on con¬ 
+trol-flow based benchmarks that had very regular loops. This led 
+us to look more closely at the program source code. With some 
+experimentation, we found that relatively simple modifications to 
+the code could significantly boost performance under method 
+speculation. 
+
+For data-parallel applications, we discovered that the original 
+methods often represented regions that were too large to specu¬ 
+late on. Inspection of the code revealed smaller data-parallel loops 
+that are closer to granularities of parallelism suitable for our system. 
+To expose this loop-level parallelism under method speculation, 
+we encapsulate the loop body that we want to represent a single 
+task as a nested method call, as shown in Example 1. idea, 
+NeuralNe t and L inpackApp show significant improvements by 
+speculating on these finer-grained parallel tasks. 
+
+Our simulator also identified variables that frequently caused 
+memory violations under speculation for certain control-flow-based 
+applications. For Hashtable and stringBuf fer, these viola¬ 
+tions corresponded to variables that are written to late in a method, 
+precluding significant overlap between successive iterations. As 
+illustrated in Example 2, moving writes to the dependent variable 
+to an earlier point and reads to this variable to a later point in the 
+method can increase overlap. For Ray trace, we eliminated a false 
+inter-method dependency by moving a write from the loop body 
+into the body of the method, as shown in Example 3. By moving 
+such dependencies between speculative methods in our bench¬ 
+marks, violations are either eliminated, oroccur earlier in execution. 
+
+
+
+
+
+
+
+private void do_mid_forward(int patt) 
+
+for (int neurode = 0; neurode < MID_SIZE; neurode++) 
+
+___, 
+
+Ido_mid_forward_iteration(patt,neurode);| 
+
+) 
+
+private void do_mid_forward_iteration(int patt, int neurode) 
+
+{ 
+
+double sum = 0.0; 
+
+for {int i = 0; i < IN_SIZE; i++) 
+
+{ 
+
+sum += mid_wts[neurode][i} * in_pats[patt][i]; 
+
+) 
+
+s\im = 1.0 / (1.0 + Math.exp(-sum)); 
+
+mid_out[neurode) = sum; 
+
+} 
+
+Example 1 - Loop body of do_pu.cLf orward () transformed 
+into a nested method call. 
+
+resulting in improved speedups. 
+
+In future studies, we hope to show that program sites that 
+may benefit fiom these types of optimizations can be identified 
+automatically, with minimal effort fiom the programmer. 
+
+5,3 Limitations of Our Study 
+
+Our choice to use the kcffe virtual machine dictated the abso¬ 
+lute performance of our system. Our experiments have shown that 
+Sun’s JDK with JIT compiler support is about 20-30% faster than 
+kcffe. For this study, though, we believe a reasonably implemented 
+JIT is sufficient for comparing the relative performance of a chip 
+multiprxx^essor with method speculation to a conventional single¬ 
+issue processor. 
+
+The effects of virtual machine support functions were elimi¬ 
+nated from the traces used to generate results. Including these 
+functions would make it more difficult to interpret the results since 
+fliey tend to reflect overheads specific to the kaffe Java virtual 
+machine implementation. In a real system, it is also hard to predict 
+how these support functions will affect performance, since they 
+could either be hidden by speculation or extend sections of se¬ 
+quential execution. 
+
+We will examine the effects of optimized JTT compiler code 
+and inclusion of virtual machine support functions on method 
+speculation as our system becomes more fiilly developed. 
+
+
+
+Example 2 - Moving a loop carried dependency to improve 
+method speculation performance. 
+
+
+6 Conclusions 
+
+This study describes how the Java virtual machine can be an 
+effective environment for exploiting method-level speculation. In 
+our model, method invocations are used as a convenient abstraction 
+of the tasks that we would like to speculate on. Not only does this 
+fi:amework simplify data dependency analysis, but it also results in 
+a clean execution model. In conjunction with a JTT compiler, this 
+system can invoke method speculation with virtually no modification 
+to the source bytecode program. 
+
+We show that speculation based on method invocations can 
+achieve significant speedups on data-parallel applications with 
+minimal programmer and compiler effort For control-flow limited 
+applications, we show that method speculation can produce modest 
+speedups. For both application classes, we find that analysis of 
+runtime behavior helps to eliminate and minimize dependencies 
+that limit speedup gains. Our preliminary experiences suggest that 
+more study is required to understand how non-data-parallel 
+applications behave under method speculation so that performance 
+on these type of applications can be improved. 
+
+Although superscalar processors may perform as well as our 
+system on data-parallel applications that have significant 
+instmction level parallelism (BLP), instmction scheduling fiom smart 
+compilers are usually required to fiiUy exploit ILP on superscalar 
+processors. Since JTT compilers generally sacrifice these high- 
+level optimizations for faster compilation, we believe that a 
+speculative chip multiprocessor can outperform a superscalar 
+processor in this configuration. It should also be noted that 
+speedups from method-level parallelism (MLP) are largely 
+orthogonal to those resulting from UP, so that an implementation 
+of a speculative chip multiprocessor using superscalar processors 
+could take advantage of both types of parallelism. 
+
+7 Future Work 
+
+Continued research on method speculation of Java programs 
+will progress along two related fionts: improving the performance 
+of method speculation on Java programs, and implementation of a 
+virtual machine targeted for a chip multiprocessor architecture that 
+can dynamically manage method speculation. 
+
+Improving the performance of method speculation on Java 
+applications without obvious data parallelism appears to be the 
+most interesting and challenging area of further study. We expect 
+that additional performance improvements on these programs will 
+result from combining incremental speedups from several 
+techniques that we are currently exploring. These techniques 
+include using algorithms to reliably identify methods that benefit 
+from speculation, applying general code transformations, such as 
+those described in Section 5.2, that improve speculation 
+performance, and expanding the applicability of speculation to a 
+larger set of method call sites. 
+
+We have also started development on a Java virtual machine 
+designed specifically for a chip multiprocessor architecture. An 
+
+
+
+
+
+
+
+
+public class RayTrace { 
+
+Point cor; 
+
+void Trace{Point pointl. Point point2, int i) 
+
+cor.x = xValuer 
+cor.y s yValue; 
+cor.z = zValue; 
+
+) 
+
+public void runO { 
+
+byte ab[] s new byte{601]; 
+int k = 0; 
+
+for (int j = 0; j < 200? j++) 
+
+{ 
+
+for (int il * 0? il < 200? il++J 
+{ 
+
+Trace(point2, pointl, 0); _ 
+
+«b[k++] « (byte)(cor.x * 2551; 
+ab[k++) = (byte)(cor.y • 255); 
+ab[k->-»] = (byte) (cor.z * 255); 
+
+<32 += dl; 
+
+) 
+
+k = 0; 
+
+) 
+
+) 
+
+) 
+
+original co6e 
+
+
+public class RayTrace { 
+
+Point cor; 
+
+void Trace(Point pointl. Point point2, int i. |byte[] ab, intl^ 
+
+
+cor.y = 
+
+cor.z = 
+
+xValue; 
+
+yValue; 
+
+zValue; 
+
+
+abtk++] 
+
+= (byte)(cor.x ’ 
+
+‘ 255); 
+
+ab[k++] 
+
+= (byte)(cor.y " 
+
+‘ 255); 
+
+ab[k++l 
+
+= (byte)(cor.z > 
+
+‘ 255); 
+
+
+public void runO { 
+
+byte ab[! = new byte(601); 
+int k = 0; 
+
+for (int j = 0; j < 200; j++> 
+
+{ 
+
+for (int il = 0; il < 200; il++) 
+
+Trace(point2, pointl, 0, |ab, ; 
+
+d2 += dl? 
+
+) 
+
+k = 0; 
+
+} 
+
+) 
+
+) 
+
+transformed code 
+
+
+
+transformed code 
+
+
+Example 3 - Eliminating a false loop carried dependency (to ab [ ], an array of bytes). 
+
+
+integrated low oveihead profiling and feedback system with a new 
+JIT compiler will dynamically manage method speculation. The 
+newcompiler will addresses performance limitations of our current 
+JTT [7] [17], and will allow us to study the effectiveness of speculation 
+on optimized JIT code. This virtual machine will also look beyond 
+explicit Java threads to parallelism within the virtual machine. By 
+enabling concurrent execution of explicitly coarse-grain virtual 
+machine tasks like the JIT compiler, class loader, garbage collector 
+and bytecode verifier, this virutal machine, together with the chip 
+multiprocessor, will be able achieve speedups even on single 
+threaded applications. 
+
+Acknowledgments 
+
+The authors wish to thank Basem Nayfeh for discussions 
+that led to many of the ideas that appear in this paper. This work 
+was supported by DARPA contract DABT63-95-C-0089. 
+
+References 
+
+[1] Byte Magazine. jBYTEmarks vO.9. Available at http:// 
+www.byte.com/, 1995. 
+
+[2] Brad Calder, Dirk Grunwald, and Benjamin Zorn. “Quantify¬ 
+ing Behavioral Differences Between C and C++ Programs.” 
+Technical Report, University of Colorado, Boulder, Jan 1994. 
+
+[3] M. Franklin and G.S. Sohi. “The Expandable Split Window 
+Paradigm for Exploiting Fine-Grain Parallelism.” In Proceed¬ 
+ings of 19^' Annual ISCA, pages 56-67, Gold Coast, Australia, 
+May 1992. 
+
+[4] Lance Hammond and Kunle Olukotun. “Data Speculation 
+Support for a Chip Multiprocessor.” To appear in Proceed¬ 
+ings of ASPLOS-VIIl. 
+
+[5] J. L. Hennessy and D. A, Patterson. Computer Architecture, 
+A Quantitative Approach 2^ Edition. Morgan Kaufmann 
+Publishers, Inc., San Francisco, California, 1996. 
+
+[6] Stephen A. Herrod, Mendel Rosenblum, Edouard Bugnion, 
+Scott Devine, Robert Bosch, John Chapin, Jinshuk Govil, 
+Dan Teodosiu, Emmett Witchel, and Ben Verghese. The 
+SimOS Simulation Environment. Available at http:// 
+simos.stanford.edu/, Feb 10 1996. 
+
+[7] Urs Holzle, Lars Bak, Steffen Grarup, Robert Griesemer, and 
+
+
+Srdjan Mitrovic. “Java On Steroids: Sun’s High-Performance 
+Java Implementation.” In Hot Chips IX, Stanford California, 
+August 25-26 1997. 
+
+[8] Tom Knight, “An Architecture for Mostly Functional 
+Languages,” Proceedings of the ACM Lisp and Functional 
+Programming Conference, pages 500-519, August 1996. 
+
+[9] M. S. Lam and R. P.Wilson. “Limits of Control Flow on 
+Parallelism.” In Proceedings of 19^ Annual ISCA, pages 46- 
+57, Gold Coast, Australia, May 1992. 
+
+[10] Tim Lindholm and Frank Yellin. The Java Virtual Machine 
+Specification. Addison-Wesley, Reading, Massachusetts, 
+1997. 
+
+[11] M. H. Lipasti, C. B. Wilkerson, and J. P. Shen. “Value 
+locality and load value prediction.” In Proceedings of 
+ASPLOS-VII, pages 138-147, Cambridge MA, October, 1996. 
+
+[12] Kunle Olukotun, Basem A. Nayfeh, Lance Hammond, Ken 
+Wilson and Kun-Yung Chang. “The Case for a Single-Chip 
+Multiprocessor.” In Proceedings ofASPLOS-VJf October 
+
+1996. 
+
+[13] Jeffrey Oplinger, David Heine, Monica S. Lam and Kunle 
+Olukotun. “In Search of Speculative Thread-Level Parallel¬ 
+ism.” Computer Systems Laboratory Technical Report CSL- 
+TR-98-765, Stanford University, July 1998, 
+
+[14] Jeffrey Oplinger, David Heine, Shih-Wei Liao, Basem A. 
+Nayfeh, Monica S. Lam and Kunle Olukotun. “Software and 
+Hardware for Exploiting Speculative Parallelism in Multipro¬ 
+cessors.” Computer Systems Laboratory Technical Report 
+CSL-TR-97-715, Stanford University, February 1997. 
+
+[15] Mendel Rosenblum, Stephen A. Herrod, Emmett Witchel, 
+and Anoop Gupta. Complete Computer Simulation: The 
+SimOS Approach. In IEEE Parallel and Distributed 
+Technology,V2\\ 1995. 
+
+[16] G. Sohi, S. Breach, andT. Vljaykumar. “Multiscalar 
+Processors.” In Proceedings of 22’^ Annual ISCA, pages 414- 
+425, Figure, Italy, June 1995. 
+
+[17] DavidUngar and Randall B. Smith. “Self: The Power of 
+Simplicity.” In Proceedings ofOOPSLA *87, ACM SIGPLAN 
+Notices, pages 227-242, December 1987. 
+
+[18] D.W.Wall. “Limits of Instruction-Level Parallelism.” Digital 
+Western Research Laboratory, WRL Research Report 93/6, 
+November 1993. 
+
+[19] Tim Wilkinson. The kaffe Virtual Machine vO.9.2. Available 
+at http://www.kaffe.org/ or http://www,transviitual.com/, 
+
+1997. 
+
+
+
+
+
+
+
+

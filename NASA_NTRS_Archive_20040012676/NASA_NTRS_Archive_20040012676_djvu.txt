@@ -1,0 +1,723 @@
+Rule-Based Runtime Verification 
+
+
+Howard Barringer* 1 , Allen Goldberg 2 , Klaus Havelund 2 and Koushik Sen** 3 
+
+
+1 University of Manchester, England 
+2 Kestrel Technology, NASA Ames Research Center, USA 
+3 University of Illinois, Urbana Champaign, USA 
+
+
+Abstract We present a rule-based framework for defining and implementing 
+finite trace monitoring logics, including future and past time temporal logic, ex- 
+tended regular expressions, real-time logics, interval logics, forms of quantified 
+temporal logics, and so on. Our logic, Eagle, is implemented as a Java library 
+and involves novel techniques for rule definition, manipulation and execution. 
+Monitoring is done on a state-by- state basis, without storing the execution trace. 
+
+
+1 Introduction 
+
+Runtime verification, or runtime monitoring, comprises having a software module, an 
+observer, monitor the execution of a program, and check its conformity with a require- 
+ment specification, often written in a temporal logic or as a state machine. Runtime 
+verification can be applied to evaluate automatically test runs, either on-line or off-line, 
+analyzing stored execution traces; or it can be used on-line during operation, potentially 
+steering the application back to a safety region if a property is violated. It is highly scal- 
+able. Several runtime verification systems have been developed, of which some were 
+presented at three recent international workshops on runtime verification [1]. 
+
+Linear temporal logic (LTL) [16] has been core to several of these attempts. The 
+commercial tool Temporal Rover (TR) [4, 5] supports a fixed future and past time LTL, 
+with the possibility of specifying real-time and data constraints (time-series) as anno- 
+tations on the temporal operators. Its implementation is based on alternating automata. 
+Algorithms using alternating automata to monitor LTL properties are also proposed in 
+[7], and a specialized LTL collecting statistics along the execution trace is described 
+in [6]. The MAC logic [15] is a form of past-time LTL with operators inspired by in- 
+terval logics and which models real-time via explicit clock variables. A logic based on 
+extended regular expressions [17] has also been proposed and is argued to be more suc- 
+cinct for certain properties. The logic described in [13] is a sophisticated interval logic, 
+argued to be more user-friendly than plain LTL. Our own previous work includes the de- 
+velopment of several algorithms, such as generating dynamic programming algorithms 
+for past time logic [1 1], using a rewriting system for monitoring future-time logic [10], 
+or generating Biichi automata inspired algorithms adapted to finite trace LTL [9]. 
+
+This large variety of logics prompted us to search for a small and general framework 
+for defining monitoring logics, which would be powerful enough to capture essentially 
+
+*This author is most grateful to RIACS/USRA and to the UK’s EPSRC under grant 
+GR/S40435/01 for the partial support provided to conduct this research. 
+
+** This author is grateful for the support received from RIACS to undertake this research while 
+participating in the Summer Student Research Program at the NASA Ames Research Center. 
+
+
+♦ 
+
+
+all of the above described logics, hence supporting future and past time logics, interval 
+logics, extended regular expressions, state machines, real-time and data constraints, and 
+statistics. The framework should support the definition of new logics in an easy man- 
+ner and should support the monitoring of programs with their complex program states. 
+The result of our search is the logic Eagle presented in this paper. The Eagle logic 
+and its implementation for run-time monitoring has in particular been significantly in- 
+fluenced by earlier work of Barringer et ah, see for example [3], on the executable 
+temporal logic MetateM. A linear-time temporal formula can be separated [8] into a 
+boolean combination of pure past, present and pure future time formulas - in particular, 
+the combination can be written as a collection of “directly executable” global condi- 
+tional rules of the form “if pure past-time then present-time and pure future-time”. The 
+present-time, or state, formulas determine how the state for the current moment in time 
+is built and the pure future-time formulas yield obligations that need to be fulfilled at 
+some time later. The separation result, rules and future obligations are central in our 
+current work. However, the fundamental difference between MetateM and Eagle is 
+that the MetateM interpreter builds traces state by state, whereas Eagle is used for 
+checking given finite traces: costly implementation features, such as backtracking and 
+loop-checking, are not required. 
+
+We recently discovered parallel work [14] using recursive equations to implement 
+a real-time logic. However we had already developed the ideas further. We provide the 
+language of recursive equations to the user, we support a mixture of future time and 
+past time operators, we treat real-time as a special case of data values, and hence we 
+allow a very general logic for reasoning about data, including the possibility of relating 
+data values across the execution trace, both forwards and backwards. 
+
+The paper is structured as follows. Section 2 introduces our logic framework, then 
+in section 3 we discuss the algorithm and calculus that underlies our implementation, 
+which is then briefly described along with initial experimentation in section 4. 
+
+2 The Logic 
+
+In this section we introduce our temporal finite trace monitoring logic Eagle. The 
+logic offers a succinct but powerful set of primitives, essentially supporting recursive 
+parameterized equations, with a minimal/maximal fix-point semantics together with 
+three temporal operators: next-time, previous-time, and concatenation. The next-time 
+and previous-time operators can be used for defining future time respectively past time 
+temporal logics on top of Eagle. The concatenation operator can be used to define 
+interval logics and an extended regular expression language. Rules are parameterized 
+to allow for reasoning about data values, including real-time. Atomic propositions are 
+boolean expressions over a program state, Java states in the current implementation. 
+The logic is first introduced informally through two examples whereafter its syntax and 
+semantics is given. Finally, its relationship to some other important logics is outlined. 
+
+2.1 Eagle by Example 
+
+Fundamental Concepts Assume we want to state a property about a program P, which 
+contains the declaration of two integer variables x and y. We want to state that whenever 
+x is positive then eventually y becomes positive. The property can be written as follows 
+
+
+2 
+
+
+
+in classical future time LTL: □(* > 0 — ► ()y > 0). The formulas DF (always F) and 0 F 
+(eventually F), for some property F, usually satisfy the following equivalences, where 
+the temporal operator OF stands for next F (meaning ‘in next state F’): 
+
+OF = F A 0(UF) OF = F V 0(OF) 
+
+One can show that DF is a solution to the recursive equation X = F A OX; in fact 
+it is -the maximal solution. A fundamental idea in our logic is to support this kind of 
+recursive definition, and to enable users define their own temporal combinators using 
+equations similar to those above. In the current framework one can write the following 
+definitions for the two combinators Always and Eventually, and the formula to be 
+monitored (Mi): 
+
+max Always(Form F) = F A OAlways(F) 
+
+min Eventual ly(Form F) = F V 0Eventual ly(F) 
+
+mon M\ = Always (x > 0 — ► Eventual ly(y >0)) 
+
+The Always operator is defined as a maximal fix-point operator; the Eventually oper- 
+ator is defined as a minimal fix-point operator. Maximal rules define safety properties 
+(nothing bad ever happens), while minimal rules define liveness properties (something 
+good eventually happens). For us, the difference only becomes important when eval- 
+uating formulas at the boundaries of a trace. To understand how this works it suffices 
+to say here that monitored rules evolve as new states are appearing. Assume that the 
+end of the trace has been reached (we are beyond the last state) and a monitored for- 
+mula F has evolved to F'. Then all applications in F* of maximal fix-point rules will 
+evaluate to true, since they represent safety properties that apparently have been satis- 
+fied throughout the trace, while applications of minimal fix-point rules will evaluate to 
+false, indicating that some event did not happen. Assume for example that we evaluate 
+the formula Mi in a state where x > 0 and y < 0, then as a liveness obligation for the 
+future we will have the expression: 
+
+O Eventual ly(y > 0) A 0 A lways(x > 0 — ► Eventually(y > 0)) 
+
+Assume that we at this point detect the end of the trace; that is: we are beyond the last 
+state. The outstanding liveness obligation Eventual ly(y > 0) has not yet been fulfilled, 
+which is an error. This is captured by the evaluation of the minimal fix-point combinator 
+Eventually to false at this point. The remaining other obligation from the A-formula, 
+namely, Always (x > 0 — > Eventually(y > 0)), is a safety property and evaluates to 
+true. 
+
+For completeness we provide remaining definitions of the future time LTL operators 
+Zl (until) and fy? (unless) below 7 . Note how W is defined in terms of other operators. 
+However, it could have been defined recursively. 
+
+min Until(Form Fi,Form F 2 ) = F 2 V (Fj AO Un til(Fi,F 2 )) 
+max Unless(Form Fi,Form F 2 ) = Until(Fi,F 2 ) VAlways(Fi) 
+
+Data Parameters We have seen how rules can be parameterized with formulas. Let’s 
+complicate the example with data parameters. Suppose we want to state the property: 
+
+
+3 
+
+
+“whenever at some point k = x > 0 for some k t then eventually y == k”. This can 
+be stated as follows in quantified LTL: 0(x > 0 — * 3k. {k = x A 0 y = k)). We use pa- 
+rameterized rules to state this property, capturing the value of x when x > 0 as a rule 
+parameter. 
+
+minR(int k) = Eventually(s.y == k) mon M 2 = Always ( 5 .x > 0 — » R(s.x)) 
+
+Rule R is parameterized with an integer k, and is instantiated in M 2 when x > 0, hence 
+capturing the value of x at that moment. Rule R replaces the existential quantifier. The 
+logic also provides a previous-time operator, which allows us to define past time op- 
+erators; the data parametrization works uniformly for rules over' past as well as future, 
+which is non-trivial to achieve since the implementation does not store the trace, see 
+Section 4. Data parametrization is also used to elegantly model real-time logics. 
+
+2.2 Syntax and Semantics 
+
+Syntax A specification S consists of a declaration part D and an observer part O. D 
+consists of zero or more rule definitions R, and O consists of zero or more monitor 
+definitions M, which specify what to be monitored. Rules and monitors are named ( N ). 
+
+S dec D obs O 
+
+D ::= R* 
+
+0 M* 
+
+R {max | min } N(T\ xi,. . . ,T n x„) = F 
+
+M ::= N = F 
+
+T Form | java primitive type 
+
+F ::= java expression \ True | False | - 1 F \ F\ AF 2 | Fi V F 2 \ F\ — »■ F 2 | 
+
+QF\ F\Fi-F2\N(F u ...,F n ) 
+
+A rule definition R is preceded by a key word indicating^ whether the interpretation is 
+maximal or minimal (which we recall determines the value of a rule application at 
+the boundaries of the trace). Parameters are typed, and can either be a formula of 
+type Form, or of a primitive Java type, such as int, long, float, etc.. The body of a 
+rule/monitor is a formula of the syntactic category Form (with meta-variables F , etc.). 
+The propositions of this logic are Java expressions over an observer state. These can 
+be arbitrary Java expressions using all of Java’s expression language constructs, rec- 
+ommended not to have no side effects. Formulas are composed using standard propo- 
+sitional logic operators together with a next-state operator (O F), a previous-state op- 
+erator (° F), and a concatenation-operator (F\ ♦ F 2 ). Finally, rules can be applied and 
+their parameters must be type correct; formula arguments can be any formula, with the 
+exception that if an argument is a java expression, it must be of boolean type. 
+
+Semantics The semantics of the logic is defined in terms of a satisfaction relation 
+|= C Trace x Form between execution traces and specifications. An execution trace 0 
+is a finite sequence of program states <r = S 1 S 2 • • • s n , where \o\ = n is the length of the 
+trace. The i’th state S[ of a trace a is denoted by a(i). The term denotes the sub- 
+trace of a from position i to position j 9 both positions included. In the implementation a 
+
+
+4 
+
+
+
+state is a user defined Java object that is updated through a user provided update method 
+for each new event generated by the program. Given a trace a and a specification dec D 
+obs O, satisfaction is defined as follows: 
+
+
+G |= dec D obs 0 iff V (N = F) € O . o, 1 \=d F 
+
+That is, a trace satisfies a specification if the trace, observed from position 1 (the first 
+state), satisfies each monitored formula. The definition of the satisfaction relation \=d 
+C ( Trace x nat) x Form , for a set of rule definitions D, is presented below, where 
+0 < i < n + 1 for some trace o = s\s 2 **-s n . Note that the position of a trace can become 
+0 (before the first state) when going backwards, and can become n + 1 (after the last 
+state) when going forwards, both cases causing rule applications to evaluate to either 
+true if maximal or false if minimal, without considering the body of the rules at that 
+point. 
+
+
+\=ojexp 
+g, i ) =o True 
+g,z^x) False 
+\=d 
+
+G, i \=e> F\ A F2 
+G, i |=£> F\ V F2 
+\=dFi -+F 2 
+QF 
+
+c,i\=D F 
+\=d F\ Fz 
+
+
+<M|=d N(F u ...,F m ) 
+
+
+iff 1 < i < |g| and evaluate (j exp) (c(i)) == true 
+
+
+iff o,ift D F 
+
+iff c,i \=d F\ and G, i | =d F 2 
+iff G,i (=£> Fi or G , i F 2 
+iff 0,2 f =d F\ implies G, i \= D F 2 
+iff i < |g| and G,i+ 1 \=d F 
+iff 1 < i and g, / - 1 j=o F 
+
+
+iff 3j>i s.t. g! 1j [==£> F\ and g^U, 1 \=d F 2 
+if 1 < / < |g| then: 
+
+G , i \=d F[x\ ^Fi,...,x n ^F n ] 
+iff l where (N(T\ x \ , . . . , T n x n ) = F) €D 
+otherwise, if i = 0 or i = \o\ 4- 1 then: 
+rule N is defined as max in D 
+
+
+A Java expression (a proposition) is evaluated in the current state in case the position i is 
+within the trace (1 < i < n). In the boundary cases (z — 0 and i = n + 1) Java expressions 
+evaluate to false. Propositional operators have their standard semantics in all positions. 
+A next-time formula QF evaluates to true if the current position is not beyond the 
+last state and F holds in the next position. Dually for the previous-time formula. This 
+means that these formulas always evaluate to false in the boundary positions (0 and 
+n + 1). The concatenation formula F\ * F 2 is true if the trace G can be split into two sub- 
+traces G — G 1 G 2 , such that Fi is true on 01 , observed from the current position /, and 
+F 2 is tme on a 2 (ignoring Gi, and thereby limiting the scope of past time operators). 
+Applying a rule within the trace (positions 1 . . . n) consists of replacing the call with the 
+right-hand side of the definition, substituting arguments for formal parameters. At the 
+boundaries (0 and n 4- 1) a rule application evaluates to true if and only if it is maximal. 
+
+
+2.3 Relationship to Other Logics 
+
+The logical system defined above is expressively rich; indeed, any linear-time tempo- 
+ral logic, whose temporal modalities can be recursively defined over the next, past or 
+
+
+5 
+
+
+
+concatenation modalities, can be embedded within it. Furthermore, since in effect we 
+have a limited form of quantification over possibly infinite data sets, and concatenation, 
+we are strictly more expressive than, say, a linear temporal fixed point logic (over next 
+and previous). A formal characterization of the logic is beyond the scope of this paper, 
+however, we demonstrate the logic’s utility and expressiveness through examples. 
+
+Past Time LTL: A past time linear temporal logic, i.e. one whose temporal modali- 
+ties only look to the past, could be defined in the mirror way to the futyre time logic 
+exemplified in the introduction by using the built-in previous modality, , in place of 
+the future next time modality, Q . Here, however, we present the definitions in a more 
+hierarchic (and logical) fashion. Note that the Zince rule defines the past-time corre- 
+spondent to the future time unless, or weak until, modality, i.e. it is a weak version of 
+Since. 
+
+min Since(Form Fi,Form Fz) = Fj V (F\ A J Since (Fi,F 2 )) 
+min Eventual lylnPast (Form F) = Since( True ,F) 
+max AlwaysInPast(Form F) = -iEventuallyInPast(->F) 
+max Zince(Form Fi,Form F 2 ) = Since(Fi,F 2 ) V Always InPast (Fi) 
+
+Combined Future and Past Time LTL: By combining the definitions for the future 
+and past time LTLs defined above, we obtain a temporal logic over the future, present 
+and past, in which one can freely intermix the future and past time modalities (to any 
+depth). We are thus able to express constraints such as if ever the variable x exceeds 0, 
+there was an earlier moment when the variable y was 4 and then remains with that value 
+until it gets increased sometime later, possibly after the moment when x exceeds 0. 
+
+monM 2 = Always(x > 0 — > Eventual lyInPast(y == 4 AUntil(y == 4 ,y > 4))) 
+
+Extended LTL and p!TL: The ability to define temporal modalities recursively pro 1 
+vides the ability to define Wolper’s ETL or the semantically equivalent fixpoint temporal 
+calculus. Such expressiveness is required to capture regular properties such as temporal 
+formula F is required to be true on every even moment of time: 
+
+max Even(Form F)=FAQO Even(F) 
+
+j 
+
+The juTL formula vx.p A A 0*V where p and q are atomic formulas, 
+
+would be denoted by the formula, XQ, where rules X and Y are: 
+
+maxX() = pAOOx()AY() min Y() = q A 0*0 V J Y() 
+
+Extended Regular Expressions: The language of Extended Regular Expressions (ERE), 
+i.e. adding complementation to regular expressions, has been proposed as a powerful 
+formalism for run-time monitoring. ERE can straightforwardly be embedded within 
+our rule-based system. Given, E $\e\a\E -E\E +E\E DF|^F|F*, let Tr(F) de- 
+note the ERE F’s corresponding Eagle formula. For convenience, we define the rule 
+max Empty() = - 1 Q True which is true only when evaluated on an empty (suffix) 
+sequence. Tr is inductively defined as follows. 
+
+
+6 
+
+
+Tr(0) = False Tr(e) = Empty() 
+
+Tr(a) = a A OEmptyQ TrQij • £ 2 ) = Tr {E \ ) ♦ Tr(F 2 ) 
+
+Tr (£1 + F 2 ) = Tr(£i) VTr(F 2 ) Tr^) nF 2 ) = Tr(FQ ATr(F 2 ) 
+
+Tr(->F) = -Tr (E) 
+
+Tr (£*) = X() where maxX().= EmptyQ | (Tr(F) - X()) 
+
+Real Time as a Special Case of Data Binding: Metric temporal logics, in which 
+temporal modalities are parameterized by some underlying real-time clock(s), can be 
+straightforwardly embedded into our system through rule parameterization. For exam- 
+ple, consider the metric temporal modality, ot' 1 ^ in a system with just one global clock. 
+An absolute interpretation of has the formula true if and only if <j> holds at some 
+
+time in the future when the real-time clock has value within the interval [f 1 , / 2 ]- For our 
+context, we assume that the finite sequence of states being monitored contains a variable 
+clock giving the real-time value of the clock for the associated state. The rule 
+
+min EventAbs (Form F, long t \ , long f 2 ) — 
+
+clock <= r 2 A (F — ► t\ <= clock) A (-F — > 0 EventA b s (^ r i ^ 2 )) 
+
+defines the operator ofa ^ for absolute values of the clock. A relativized version of the 
+modality can then be defined as: 
+
+min EventRel(Form F,Iong r l3 longt 2 ) = EventAbs(F ) clock + tuclock + t 2 )) 
+
+Counting and Statistical Calculations: In a monitoring context, one may wish to 
+gather statistics on the truth of some property, for example whether a particular state 
+property <j) holds with at least some probability p over a given sequence, i.e. it doesn’t 
+fail with probability greater than (1—p). Consider the operator II!p<t> defined by: 
+
+a , i f= Dp<t> iff 35 C {/..|a|} s.t. JpL .> -pAVjeS. a, j (=' 
+
+An encoding within our logic can then be given as: 
+
+min A(Form <)>, float p, int /,int t) = 
+
+(OEmpty() A ((<t> A (1 - j ) >= p) V (-><(» A (1 - ^j 1 ) >= p))) V 
+(-iEmpty() A ((<}> -> (>(<)>, />>/,* + 0) A (“4 ^ OA(<t>,/?,/+ l,f + 1)))) 
+
+min AtLeast(Form (j), float p) = A((| ),p, 0, 1) 
+
+Towards Context Free: Above we showed that Eagle could encode logics such as 
+ETL, which extend LTL with regular grammars (when restricted to finite traces), or 
+even extended regular expressions. In fact, we can go beyond regularity into the world 
+of context-free languages, necessary, for example, to express properties such as every 
+login is matched by a logout and at no point are there more logouts than logins. Indeed, 
+such a property can be expressed in several ways in Eagle. Assume we are monitoring 
+a sequence of login and logout events. We can define a rule Match(Form F \ , Form F 2 ) 
+and monitor with Hatch(login : logout) where: 
+
+min Match(Form F \ , Form F 2 ) = F\ • Match(/q , F 2 ) • F 2 * Match(Fi , F 2 ) V EmptyQ 
+
+
+7 
+
+
+
+Less elegantly, and which we leave as an exercise, one could use the rule parametriza- 
+tion mechanism to count the numbers of logins and logouts. 
+
+3 Algorithm 
+
+In this section, we now outline the computation mechanism used to determine whether 
+a given monitoring formula holds for some given input sequence of events. On the 
+observer side a local state is maintained. The atomic propositions are specified with 
+respect to the variables in this local state. At every event the observer modifies the local 
+state of the observer based on that event and then evaluates the monitored formulas on 
+that state and generates a new set of monitored formulas. At the end of the trace the 
+value of the monitored formulas are determined. The evaluation of a formula F on a 
+state s = <j(i) in a trace cr results in an another formula eval(F, s) with the property that 
+a, i |= F if and only if a, i -f 1 [= eval(F , s). The definition of the operator eval : Form x 
+State — ► Form uses another auxiliary operator update : Form x State — + Form. The 
+intuition behind using the operator update is to update a formula properly in presence of 
+previous operators. The value of a formula F at the end of a trace is given by value (F). 
+The operator value : Form — > {True, False} returns True if the formula is satisfied by 
+an empty trace and returns False otherwise. The definition of the operators eval, update 
+and value forms the calculus of the recursive rule-based framework. We define this 
+calculus next. 
+
+3.1 Calculus 
+
+The eval, update ajd value operators are defined a priori for all operators except for the 
+previous operator and rule application. The definitions of eval, update and value for 
+the rule application get generated based on the definition of rules in the specification. 
+We do not define the functions on the previous operator, since this operator is eliminated 
+in the translations we perform before we apply the rules. The definition of eval , update 
+and value on the different operators is given below. 
+
+eval(jexp,s) = value of jexp in s 
+
+eval{F\ opFiiS) = eval(F\,s) op eval(Fz,s ) where op £ {A,V,— ►} 
+eval(pF,s) = ^eval(F,s) 
+eval(Q)F,s ) = update (F, s) 
+
+up date (j exp, s) = jexp 
+
+update(F\ op F^s) = update (F\,s) op update (Fi,s) where op £ {A, V,— >} 
+update(~^F,s ) = -« update(F,s ) 
+update (QF,s) = Q update (F,s) 
+
+value (jexp, s) = False 
+
+value(F\ op Fi,s) = value(F\,s) op valued, s) where op £ {A, V,— »*} 
+value(^F,s) = -rvalue (F, s) 
+value(Q)F,s) = False 
+
+Note that eval of a formula of the form QF on a state s reduces to the update of F on 
+state s . This ensures that if F contains any past time operators then update of F updates 
+
+
+them properly. Moreover, value (QF) is False as the operator Q is assumed to have 
+strong interpretation in the logic. The value of a max rule is True and that of a min rule 
+is False. 
+
+va/ne(R(Fi,... ,F n ),s) = True if R is max 
+value(R(Fi,... ,F n ),s) = False if R is min 
+
+However, the definition of the eval and update operators for the rules are not generic for 
+all rules. They are synthesized according to the definition of the rules in the specifica- 
+tion. We call this algorithm the monitor synthesis algorithm. We describe the algorithm 
+informally through examples. Consider the following rule. 
+
+max Always(Form F)=F A Q. Always(F) 
+
+For this rule eval and update are defined as follows. 
+
+€vaZ(Always(F),s) = eval(F A O Always (F),s) 
+update(Always(F),s) = update(F A 0 A l wa 7 s (F), s) 
+
+However, the definition of update results in infinite recursion. To break the recursion we 
+note that the rule Always does not contain any previous operator, although the argument 
+F may contain some. So we simply propagate the update to the argument F. Thus the 
+new definition of update becomes: 
+
+update(Always(F), s) = Always (update (F, 5)) 
+
+If the rule contains a formula F guarded by a previous operator on its right hand side 
+then we evaluate F at every event and use the result of this evaluation in the next state. 
+Thus, the result of evaluating F is required to be stored in some temporary placeholder 
+so that it can be used in the next state. To allocate a placeholder, we introduce, for 
+every formula guarded by a previous operator, an argument in the rule and use these 
+arguments in the definition of eval and update for this rule. Let us illustrate this with 
+the following example. 
+
+max R(Form Fi,Form F2) = Fi A J (F2 VR(Fi,F2)) 
+
+For this rule we introduce another auxiliary rule R' which contains an extra argument 
+corresponding to the formula (F2 VR(Fi,F2)). 
+
+R(Form F \ , Form Fi) = R'(Fj , F^value^i V R(F* , F 2 ))) 
+eval(R f (F\,F2,past x ),s) = eval(F\ A pastes) 
+
+update^! (F\,F2,past l ),s) = (update (Fi,s),update(F2 ) s),eval(F2 VR / (Fi,F2,past l ),s)) 
+
+Here, in eval , the subformula J (F2 VR(Fj..F 2)) guarded by the previous operator is 
+replaced by the argument past x that contains the evaluation of the subformula in the 
+previous state. In update we not only update the arguments F\ and F2 but also evaluate 
+the subformula F2 V %! (F\, Flypast x ) and pass it as third argument of R'. Thus in the 
+next state past { is bound to (F2 V %! (F\,Fz,pasti)). The translation, however, does 
+
+not work correctly in case of update for a rule whose right hand side contains other 
+rules. For example let us consider the rule: 
+
+max R2(Form F) = R(F,F) V O r 2‘(F) 
+
+
+9 
+
+
+
+This rule contains the rule R on its right hand side. Now if we simply define the update 
+operator for this rule as follows 
+
+updatefaiF)^) = R2 {update (F,s)) 
+
+then this definition is not entirely correct as it does not update the rule R (F,F) that 
+contains past time operators. The ideal definition of update should be: 
+
+update(R2(F),s) = update ( r(F, F) V Q>R2{F),s) 
+
+But, as before, this definition results in infinite recursion. This is resolved by introducing 
+additional arguments as in the case of previous operators. For every rule that appears 
+on the right hand side we introduce an argument and bind the rule to that argument. For 
+example for R2 we define the eval and update as follows. 
+
+R 2 (F)=R^(F,R(F,F)) 
+
+eval{^ 2 {F> inner 1 ) , s) = eval{inner\ V QR^F, inner i),j) 
+update (^(Fpnneri)^) = ^(update (F,s)> update (inneri,s)) 
+
+In case the type of arguments passed to a rule are different from Form the definition of 
+the operator eval changes for that rule. Before doing the eval on the right hand side of 
+the rule we first evaluate, may be partially, the arguments whose types are not Form. 
+Let us consider the following example. 
+
+max R3 (int k) ~ (s .x == k) V 0 R 3 0 s O' + &) 
+
+The eval and update for the above rule are defined as follows. 
+
+eval(Rs(argi).,s) = 1 etk = eval(arg l1 s) in eval((s.x == k) V O r 3 (s-y + k),s) 
+update(R 3 (arg l ),s) = R 3 (arg 1 ) 
+
+Here, the result of eval(arg u s), where arg x is a java expression, may be a partially 
+evaluated java expression if java expressions referred by some of the variables in arg x 
+are partially evaluated. The java expression gets fully evaluated once the java expres- 
+sions referred by all the variables are fully evaluated. Thus, we translate the rules in 
+the specification to a set of definition of eval and update operators. Once we have this 
+translation we can easily execute, or in other words, evaluate all the monitors at each 
+state in a trace of a running program. 
+
+4 Implementation and Experiments 
+
+We have implemented this monitoring framework in Java. Currently it does not allow 
+mutually recursive rules, however, this will be supported for the case where all the 
+rules in the specification are purely future time. The implemented system works in two 
+phases. First, it compiles the specification file to generate a set of Java classes; a class 
+is generated for each rule. Second, the Java class files are compiled into Java bytecode 
+and then the monitoring engine runs on a trace; the engine dynamically loads the Java 
+classes for rules at monitoring time. 
+
+
+10 
+
+
+
+Our implementation of propositional logic uses the decision procedure of Hsiang 
+[12]. The procedure reduces a tautological formula to the constant true, a false formula 
+to the constant false, and all other formulas to canonical forms which are exclusive or 
+(0) of conjunctions. The procedure is given below using equations that are shown to be 
+Chureh-Rosser and terminating modulo associativity and commutativity. 
+
+true A 4> = <j> false A <j> = false 
+
+<)> A <j) = <j> false 0 (j) = <|> 
+
+<J> 0 (|> — false -4 = true 0 <J) 
+
+<t>i A ((j)2 ® fa) = (<f>i A (j) 2 ) 0 (4>i A <fe) <f>i V <>2 = (<t>i A <fct) © <|>i 0 (j>2 
+
+(>i — ^ <}>2 = true 0<J)i 0(01 A(fc) (j>i == <(>2 == true 0 <j)i 0 (j >2 
+
+The above ensures that the size of a formula is small. In the translational phase, a Java 
+class is generated for each rule in the specification. The Java class contains a construc- 
+tor, a value method, an eval method, and a update method corresponding to the value, 
+eval and update operators in the calculus. The arguments are made fields in the class 
+and they are initialized through the constructor. The choice of generating Java classes 
+for each rule is for getting an efficient implementation. To handle partial evaluation we 
+wrap every java expression in a Java class. Each of those classes contains a method 
+isAvailable () that returns true whenever the java expression representing that class 
+is fully evaluated and returns false otherwise. The class also stores, as fields, the dif- 
+ferent other java expression objects corresponding to the different variables (formula 
+variables and state variables) that it uses in its java expression. Once all those java ex- 
+pressions are fully evaluated, the object for the java expression evaluates itself and any 
+subsequent call of isAvailable {) on this object returns true. 
+
+Once all the Java classes have been generated, the engine compiles all the generated 
+Java classes, creates a list of monitors (which are also formulas) and starts monitoring 
+all of them. During monitoring the engine takes the states from the trace, one by one, 
+and evaluates the list of monitors on each to generate another list of formulas that be- 
+come the new monitors for the next state. If at any point a monitor (a formula) becomes 
+false an error message is generated and that monitor is removed from the list. At the 
+end of a trace the value of each monitor is calculated and if false, a warning message 
+for the particular monitor is generated. The details of the implementation are beyond 
+the scope of the paper. However, interested readers can get the tool from the authors. 
+
+Eagle has been applied to test a planetary rover controller in a collaborative effort 
+with other colleagues, see [2] for an earlier similar experiment using a simpler logic. 
+The rover controller, written in 35,000 lines of C++, executes action plans. The testing 
+environment, consists of a test-case generator, automatically generating input plans for 
+the controller. Additionally, for each input plan a set of temporal formulas is generated 
+that the plan execution should satisfy. The controller is executed on the generated plans 
+and the implementation of Eagle is used to monitor that execution traces satisfy the 
+formulas. An unknown error was detected in the first run, demonstrating that a certain 
+task did not recognize the too early termination of some other task. 
+
+5 Conclusion and Future Work 
+
+We have presented the succinct and powerful logic Eagle, based on recursive param- 
+eterized rule definitions over three primitive temporal operators. We have indicated its 
+
+
+11 
+
+
+
+power by expressing some other sophisticated logics in it. Initial experiments have been 
+successful. Future work includes: optimizing the current implementation; supporting 
+user-defined surface syntax; associating actions with formulas; and incorporating auto- 
+mated program instrumentation. 
+
+References 
+
+1. 1st, 2nd and 3rd CAV Workshops on Runtime Verification (RV’Ol - RV’03), volume 55(2), 
+70(4), 89(2) of ENTCS. Elsevier Science: 2001, 2002, 2003. 
+
+2. C. Artho, D. Drusinsky, A. Goldberg, K. Havelund, M. Lowry, C. Pasareanu, G. Ro§u, and 
+W. Visser. Experiments with Test Case Generation and Runtime Analysis. In E. Borger, 
+A. Gargantini, and E. Riccobene, editors, Abstract State Machines (ASM '03), LNCS, pages 
+87—107. Springer, March 2003. 
+
+3. H. Barringer, M. Fisher, D. Gabbay, G. Gough, and R. Owens. MetateM: An introduction. 
+Formal Aspects of Computing, 7(5):533— 549, 1995. 
+
+4. D. Drusinsky. The Temporal Rover and the ATG Rover. In K. Havelund, J. Penix, and 
+W. Visser, editors, SPIN Model Checking and Software Verification , volume 1885 of LNCS , 
+pages 323-330. Springer, 2000. 
+
+5. D. Drusinsky. Monitoring Temporal Rules Combined with Time Series. In CAV’ 03 , volume 
+2725 of LNCS , pages 1 14-118. Springer- Verlag, 2003. 
+
+6. B. Finkbeiner, S. Sankaranarayanan, and H. Sipma. Collecting Statistics over Runtime Exe- 
+cutions. In Proceedings of Runtime Verification (RV’02) [1], pages 36-55. 
+
+7. B. Finkbeiner and H. Sipma. Checking Finite Traces using Alternating Automata. In Pro- 
+ceedings of Runtime Verification (RV’Ol ) [1], pages 44—60. 
+
+8. D. Gabbay. The Declarative Past and Imperative Future: Executable Temporal Logic for In- 
+teractive Systems. In Proceedings of the 1st Conference on Temporal Logic in Specification, 
+Altrincham, April 1987 , volume 398 of LNCS, pages 409-448, 1989. 
+
+9. D. Giannakopoulou and K. Havelund. Automata-Based Verification of Temporal Properties 
+on Running Programs. In Proceedings , International Conference on Automated Software 
+Engineering (ASE’01), pages 412-7-16. ENTCS, 2001. Coronado Island, California. 
+
+' 10. K. Havelund and G. Ro§u. Monitoring Programs using Rewriting. In Proceedings, Interna- 
+tional Conference on Automated Software Engineering (ASE’01), pages 135-143. Institute 
+of Electrical and Electronics Engineers, 2001 . Coronado Island, California. 
+
+11. K. Havelund and G. Ro§u. Synthesizing Monitors for Safety Properties. In Tools and Algo- 
+rithms for Construction and Analysis of Systems (TACAS’02), volume 2280 of Lecture Notes 
+in Computer Science , pages 342-356. Springer, 2002. 
+
+12. Jieh Hsiang. Refutational Theorem Proving using Term Rewriting Systems. Artificial Intel- 
+ligence, 25:255-300, 1985. 
+
+13. D. Kortenkamp, T. Milam, R. Simmons, and J. Fernandez. Collecting and Analyzing Data 
+from Distributed Control Programs. In Proceedings of RV’Ol [1], pages 133-151. 
+
+14. K. Jelling Kristoffersen, C. Pedersen, and H. R. Andersen. Runtime Verification of Timed 
+LTL using Disjunctive Normalized Equation Systems. In Proceedings of Runtime Verifica- 
+tion (RV’03) [1], pages 146-161. 
+
+15. 7. Lee, S. Kannaii, M. Kim, O. Sokolsky, and M. Viswanathan. Runtime Assurance Based 
+on Formal Specifications. In Proceedings of the International Conference on Parallel and 
+Distributed Processing Techniques and Applications , 1999. 
+
+16. A. Pnueli. The Temporal Logic of Programs. In Proceedings of the 18th IEEE Symposium 
+on Foundations of Computer Science, pages 46-77, 1977. 
+
+17. K. Sen and G. Ro§u. Generating Optimal Monitors for Extended Regular Expressions. In 
+Proceedings of the 3rd Workshop on Runtime Verification (RV’03) [1], pages 162-181. 
+
+
+12 
+
+

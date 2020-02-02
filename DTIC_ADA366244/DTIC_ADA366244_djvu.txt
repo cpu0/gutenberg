@@ -1,0 +1,1713 @@
+PACIFIC SOFTWARE RESEARCH CENTER 
+
+Technical Report 
+
+
+
+
+
+
+
+Definition of language binding for Haskell 
+
+Pacific Software Research Center 
+July 29,1999 
+
+
+CONTRACT NO. F19628-96-C-0161 
+CDRL SEQUENCE NO. [CDRL 0002.10] 
+
+
+Prepared for: 
+
+USAF 
+
+Electronic Systems Center/AVK 
+
+
+Prepared for: 
+
+Pacific Software Research Center 
+Oregon Graduate Institute of Science and Technology 
+PO Box 91000 
+Portland, OR 97291 
+
+
+DISTRIBUTION STATEMENT A 
+
+Approved for Public Release 
+Distribution Unlimited 
+
+
+ppys QUALITY nwnwrtl!* 
+
+
+
+
+
+Green card: a foreign-language interface for Haskell 
+
+Simon Peyton Jones 
+
+Glasgow University and Oregon Graduate Institute 
+Thomas Nordin 
+
+Royal Institute of Technology, Stockholm, and Oregon Graduate Institute 
+
+Alastair Reid 
+Yale University 
+
+February 14, 1997 
+
+
+1 Motivation 
+
+A foreign-language interface provides a way for soft¬ 
+ware components written in a one language to interact 
+with components written in another. Programming 
+languages that lack foreign-language interfaces die a 
+lingering death. 
+
+This document describes Green Card, a foreign- 
+language interface for the non-strict, purely func¬ 
+tional language Haskell. We assume some knowledge 
+of Haskell and C. 
+
+
+1.1 Goals and non-goals 
+
+Our goals are limited. We do not set out to solve the 
+foreign-language interface in general; rather we intend 
+to profit from others’ work in this area. Specifically, 
+we aim to provide the following, in priority order: 
+
+1. A convenient way to call C procedures from 
+Haskell. 
+
+2. A convenient way to write COM 1 software com¬ 
+ponents in Haskell, and to call COM compo¬ 
+nents from Haskell. 
+
+The ability to call C from Haskell is an essential foun¬ 
+dation. Through it we can access operating system 
+services and mountains of other software libraries. 
+
+In the other direction, should we be able to write a 
+Haskell library that a C program can use? In principle 
+this makes sense but in practice there is zero demand 
+for it. The exception is that the ability to support 
+some sort of call-backs is essential, but that is a very 
+limited form of C calling Haskell. 
+
+1 Microsoft’s Common Object Model (COM) is a language- 
+independent software component architecture. It allows ob¬ 
+jects written in one language to create objects written in an¬ 
+other, and to call their methods. The two objects may be 
+in the same address space, in different address spaces on the 
+same machine, or on separate machines connected by a net¬ 
+work. OLE is a set of conventions for building components on 
+top of COM. 
+
+
+Should we support languages other than C? The trite 
+answer is that pretty much everything available as a 
+library is available as a C library. For other languages 
+the right thing to do is to interface to a language- 
+independent software component architecture, rather 
+than to a raft of specific languages. For the moment 
+we choose COM, but CORBA 2 might be another sen¬ 
+sible choice. 
+
+While we do not propose to call Haskell from C, it 
+does make sense to think of writing COM software 
+components in Haskell that are used by clients. For 
+example, one might write an animated component 
+that sits in a Web page. 
+
+This document, however, describes only (1), the C 
+interface mechanism. 
+
+2 Foreign language interfaces are 
+harder than they look 
+
+Even after the scope is restricted to designing a 
+foreign-language interface from Haskell to C, the task 
+remains surprisingly tricky. At first, one might think 
+that one could take the C header file describing a 
+C procedure, and generate suitable interface code to 
+make the procedure callable from Haskell. 
+
+Alas, there are numerous tiresome details that are 
+simply not expressed by the C procedure prototype 
+in the header file. For example, consider calling a C 
+procedure that opens a file, passing a character string 
+as argument. The C prototype might look like this: 
+
+int open( char *filename ) 
+
+Our goal is to generate code that implements a 
+Haskell procedure with type 
+
+open :: String -> 10 FileDescriptor 
+
+• First there is the question of data representa¬ 
+tion. One has to decide either to alter the 
+Haskell language implementation, so that is 
+
+2 CORBA is a vendor-independent competitor of COM. 
+
+
+
+
+string representation is identical to that of C, 
+or to translate the string from one representa¬ 
+tion to another at run time. This translation is 
+conventionally called marshalling. 
+
+Since Haskell is lazy, the second approach is 
+required. (In general, it is tremendously con¬ 
+straining to try to keep common representations 
+between two languages. For example, precisely 
+how does C lay out its structures?) 
+
+• Next come questions of allocation and lifetime. 
+Where should we put the translated string? In 
+a static piece of storage? (But how large a block 
+should we allocate? Is it safe to re-use the same 
+block on the next call?) Or in Haskell’s heap? 
+(But what if the called procedure does some¬ 
+thing that triggers garbage collection, and the 
+transformed string is moved? Can the called 
+procedure hold on to the string after it returns?) 
+
+Or in C’s malloc’d heap? (But how will it get 
+deallocated? And malloc is expensive.) 
+
+• C procedures often accept pointer parameters 
+(such as strings) that can be NULL. How is that 
+to be reflected on the host-language side of the 
+interface? For example, if the documentation 
+for open told us that it would do something sen¬ 
+sible when called with a NULL string, we might 
+like the Haskell type for open to be 
+
+open :: Maybe String -> 10 FileDescriptor 
+
+so that we can model NULL by Nothing. 
+
+• The desired return type, FileDescriptor, will 
+presumably have a Haskell definition such as 
+this: 
+
+newtype FileDescriptor = FD Int 
+
+The file descriptor returned by open is just 
+an integer, but Haskell programmers often use 
+newtype declarations create new distinct types 
+isomorphic to existing ones. Now the type sys¬ 
+tem will prevent, say, an attempt to add one to 
+a FileDescriptor. 
+
+Needless to say, the Haskell result type is not 
+going to be described in the C header file. 
+
+• The file-open procedure might fail; sometimes 
+details of the failure are stored in some global 
+variable, errno. Somehow this failure and the 
+details of what went wrong must be reflected 
+into Haskell’s ID monad. 
+
+• The open procedure causes a side effect, so it 
+is appropriate for its type to be in Haskell’s 
+10 monad. Some C functions really are func¬ 
+tions (that is, they have no side effects), and in 
+this case it makes sense to give them a “pure” 
+Haskell type. For example, the C function sin 
+should appear to the Haskell programmer as a 
+function with type 
+
+
+sin :: Float -> Float 
+
+• C procedure specifications are not explicit about 
+which parameters are in parameters, which out 
+and which in out. 
+
+None of these details are mentioned in the C header 
+file. Instead, many of them are in the manual page 
+for the procedure, while others (such as parameter 
+lifetimes) may not even be written down at all. 
+
+3 Overview of Green Card 
+
+The previous section bodes ill for an automatic system 
+that attempts to take C header files and automatically 
+generate the “right” Haskell functions; C header files 
+simply do not contain enough information. 
+
+The rest of this paper describes how we approach the 
+problem. The general idea is to start from the Haskell 
+type definition for the foreign function, rather than 
+the C prototype. The Haskell type contains quite a 
+bit more information; indeed, it is often enough to 
+generate correct interface code. Sometimes, however, 
+it is not, in which case we provide a way for the pro¬ 
+grammer to express more details of the interface. All 
+of this is embodied in a program called “Green Card”. 
+
+Green Card is a Haskell pre-processor. It takes a 
+Haskell module as input, and scans it for Green-Card 
+directives (which are lines prefixed by “X”). It pro¬ 
+duces a new Haskell module as output, and sometimes 
+a C module as well (Figure 1). 
+
+Green Card’s output depends on the particular 
+Haskell implementation that is going to compile it. 
+For the Glasgow Haskell Compiler (GHC), Green 
+Card generates Haskell code that uses GHC’s primi¬ 
+tive ccall/casm construct to call C. All of the argu¬ 
+ment marshalling is done in Haskell. For Hugs, Green 
+Card generates a C module to do most of the argu¬ 
+ment marshalling, while the generated Haskell code 
+uses Hugs’s prim construct to access the generated C 
+stubs. 
+
+For example, consider the following Haskell module: 
+module M where 
+
+*/,fun sin :: Float -> Float 
+
+sin2 :: Float -> Float 
+sin2 x = sin (sin x) 
+
+Everything is standard Haskell except the %fun line, 
+which asks Green Card to generate an interface to 
+a (pure) C function sin. After the GHC-targeted 
+version of Green Card processes the file, it looks like 
+this 3 : 
+
+3 Only GHC aficionados will understand this code. The 
+whole point of Green Card is that Joe Programmer should 
+not have to learn how to write this stuff. 
+
+
+2 
+
+
+
+
+
+
+Figure 1: The big picture 
+
+
+module M where 
+
+sin :: Float -> Float 
+sin f = unsafePerformPrimlO ( 
+case f of { F# f# -> 
+
+_casm_ “7.r = sin (7.0) ’> f# 
+
+‘thenPrimlO* \ r# -> 
+returnPrimlO (F# r#)>) 
+
+sin2 :: Float -> Float 
+sin2 x = sin (sin x) 
+
+The un line has been expanded to a blob of grue¬ 
+some boilerplate, while the rest of the module comes 
+through unchanged. 
+
+If Hugs were the target, the Haskell source file re¬ 
+mains unchanged, but a the Hugs variant of Green 
+Card would generate output that uses Hugs’s prim¬ 
+itive mechanisms for calling C. Much of the Green- 
+Card implementation is, however, shared between 
+both variants. (We hope . The Hugs variant isn’t even 
+written.) 
+
+4 Green Card directives 
+
+Green Card pays attention only to Green-Card direc¬ 
+tives, each of which starts with a “*/•” at the beginning 
+of a line. All other lines are passed through to the 
+output Haskell file unchanged. 
+
+The syntax of Green Card directives is given in Fig¬ 
+ure 2). The syntax for dis is given later (Figure 3). 
+The form Any x means any symbol except x. 
+
+Green Card understands the following directives: 
+
+• 7.f un begins a procedure specification , which de¬ 
+scribes the interface to a single C procedure 
+(Section 5). 
+
+• 7.dis allows the programmer to describe a new 
+Data Interface Scheme (DIS). A DIS describes 
+how to translate, or marshall, data from Haskell 
+to C and back again (Section 6). 
+
+• */,const makes it easy to generate a collection of 
+new Haskell constants derived from C constants. 
+
+
+This can be done with 7,fun, but '/.const is much 
+more concise (Section 5.6). 
+
+• 7*pr ef ix makes it easy to remove standard pre¬ 
+fixes from the Haskell function name, those are 
+usually not needed since Haskell allows qualified 
+imports (Section 5.7). 
+
+• Procedure specifications can, as we shall see, 
+contain fragments of C. 7,#include tells Green 
+Card to arrange that a specified C header file 
+will be included with the C code in the proce¬ 
+dure specifications when the latter is fed to a C 
+compiler (Section 8). 
+
+A directive can span more than one line, but the con¬ 
+tinuation lines must each start with a % followed by 
+some whitespace. For example: 
+
+7,fun draw :: Int — Length in pixels 
+
+7. -> Maybe Int — Width in pixels 
+
+% -> io 0 
+
+Haskell-style comments are permitted in Green-Card 
+directives. 
+
+A general principle we have followed is to define a sin¬ 
+gle, explicit (and hence long-winded) general mech¬ 
+anism, that should deed with just about anything, 
+and then define convenient abbreviations that save 
+the programmer from writing out the general mecha¬ 
+nism in many common cases. We have erred on the 
+conservative side in defining such abbreviations; that 
+is, we have only defined an abbreviation where do¬ 
+ing without it seemed unreasonably long-winded, and 
+where there seemed to be a systematic way of defining 
+an abbreviation. 
+
+
+5 Procedure specifications 
+
+The most common Green-Card directive is a proce¬ 
+dure specification. It describes the interface to a C 
+procedure. A procedure specification has four parts: 
+
+Type signature: 7.fun (Section 5.1). The 7.fun 
+statement starts a new procedure specification, 
+
+
+3 
+
+
+
+
+Program 
+
+idl 
+
+-y 
+
+decl \,... decln 
+
+n > 1 
+
+Declaration 
+
+decl 
+
+-»■ 
+
+i 
+
+i 
+
+i 
+
+proc 
+
+/const Var [Vari . ..Var n ] 
+7.dis Var Var\ ... Var n = dis 
+*/,#include filename 
+•/.prefix Var 
+
+Constants n > 1 
+n > 0 
+
+Scope over cexp 
+
+Prefix to strip from Haskell function names 
+
+Procedure 
+
+proc 
+
+-y 
+
+sig [call] [ccode] [result] 
+
+
+Signature 
+
+sig 
+
+-> 
+
+'/.fun Var : : Type 
+
+Name and type 
+
+Type 
+
+type 
+
+-+ 
+
+i 
+
+i 
+
+Var 
+
+Var type 
+type -> type 
+(type i ,... type n ) 
+
+Tuple n > 0 
+
+Call 
+
+call 
+
+
+'/.call dis\ ... disn 
+
+
+Result 
+
+result 
+
+-+ 
+
+i 
+
+/fail cexp cexp [result] 
+/.result dis 
+
+In IO Monad 
+
+C Expression 
+
+cexp 
+
+-> 
+
+i 
+
+{ Anyy > 
+ccode 
+
+
+C Code 
+
+ccode 
+
+-j- 
+
+/code Var 
+
+
+Filename 
+
+filename 
+
+->■ 
+
+i 
+
+<Var> 
+
+"Var" 
+
+Passed to C 
+
+Passed to C 
+
+
+Figure 2: Grammar for Green Card 
+
+
+giving the name and Haskell type of the func¬ 
+tion. 
+
+Parameter marshalling: ’/.call 
+
+(Section 5.2). The ‘/.call statement tells Green 
+Card how to translate the Haskell parameters 
+into their C representations. 
+
+The body: 7*code (Section 5.3). The '/.code state¬ 
+ment gives the body and it can contain arbi¬ 
+trary C code. Sometimes the body consists of 
+a simple procedure call, but it may also include 
+variable declarations, multiple ceills, loops, and 
+so on. 
+
+Result marshalling: '/result, '/.fail 
+
+(Section 5.4). The result-marshalling state¬ 
+ments tell Green Card how to translate the re¬ 
+sult (s) of the call back into Haskell values. 
+
+Any of these parts may be omitted except the type 
+signature. If euiy part is missing, Green Card will fill 
+in a suitable statement based on the type signature 
+given in the '/fun statement. For example, consider 
+this procedure specification: 
+
+'/.fun sin :: Float -> Float 
+Green Card fills in the missing statements like this 4 : 
+
+4 The details of the filled-in statements will make more 
+sense after reading the rest of Section 5 
+
+
+'/.fun sin :: Float -> Float 
+'/.call (float xl) 
+
+'/.code result = sin(xl); 
+
+'/.result (float result) 
+
+The rules that guide this automatic fill-in are de¬ 
+scribed in Section 5.5. 
+
+A procedure specification can define a procedure with 
+no input parameter, or even a constant (a “proce¬ 
+dure” with no input parameters and no side effects). 
+In the following example, printBangis an example of 
+the former, while grey is an example of the latter 5 : 
+
+'/.fun printBang :: 10 () 
+
+'/.code printf ( "! " ); 
+
+'/.fun grey :: Colour 
+7.code r = GREY; 
+
+'/result (colour r) 
+
+All the C variables bound in the /call statement or 
+mentioned in the '/.result statement, are declared by 
+Green Card and in scope throughout the body. In the 
+examples above, Green Card would have declared xl, 
+result and r. 
+
+“When there are no parameters, the /call line can be omit¬ 
+ted. The second example can also be shortened by writing a 
+C expression in the /.result statement; see Section 5.4. 
+
+
+4 
+
+
+
+5.1 Type signature 
+
+The */,f un statement starts a new procedure specifica¬ 
+tion. 
+
+Green Card supports two sorts of C procedures: ones 
+that may cause side effects (including I/O), and ones 
+that are guaranteed to be pure functions. The two are 
+distinguished by their type signatures. Side-effecting 
+functions have the result type 10 t for some type t. 
+
+If the programmer specifies any result type other than 
+10 t, Green Card takes this as a promise that the C 
+function is indeed pure, and will generate code that 
+calls unsafe Per form 10. 
+
+The procedure specification will expand to the defini¬ 
+tion of a Haskell function, whose name is that given 
+in the '/,fun statment, with two changes: the longest 
+matching prefix specified with a */,pref ix (Section 5.7 
+elaborates)statement is removed from the name and 
+the first letter of the remaining function name is 
+changed to lower case. Haskell requires all function 
+names to start with a lower-case letter (upper case 
+would indicate a data constructor), but when the C 
+procedure name begins with an upper case letter it 
+is convenient to still be able to make use of Green 
+Card’s automatic fill-in facilities. For example: 
+
+•/.fun OpenWindow : : Int -> 10 Window 
+
+would expand to a Haskell function openWindow 
+that is implemented by calling the C procedure 
+OpenWindow. 
+
+7,prefix Win32 
+
+7,fun Win320penWindow :: Int -> 10 Window 
+
+would expand to a Haskell function openWindow 
+that is implemented by calling the C procedure 
+Win320penWindow. 
+
+5.2 Parameter marshalling 
+
+The 7call statement tells Green Card how to trans¬ 
+late the Haskell parameters into C values. Its syntax 
+is designed to look rather like Haskell pattern match¬ 
+ing, and consists of a sequence of zero or more Data 
+Interface Schemes (DISs), one for each (curried) ar¬ 
+gument in the type signature. For example: 
+
+'/.fun foo Float -> (Int.Int) -> String -> 10 
+•/.call (float x) (int y, int z) (string s) 
+
+This 7 call statement binds the C variables x, y, 
+z, and s, in a similar way that Haskell’s pattern- 
+matching binds variables to (parts of) a function’s 
+arguments. These bindings are in scope throughout 
+the body and result-marshalling statements. 
+
+In the ‘/.call statement, “float”, “int”, and 
+“string” are the names of the DISs that are used 
+to translate between Haskell and C. The names of 
+these DISs are deliberately chosen to be the same as 
+the corresponding Haskell types (apart from chang¬ 
+
+
+ing the initial letter to lower case) so that in many 
+cases, including foo above, Green Card can generate 
+the ‘/.call line by itself (Section 5.5). In fact there is a 
+fourth DIS hiding in this example, the (_,_) pairing 
+DIS. DISs are discussed in detail in Section 6. 
+
+
+5.3 The body 
+
+The body consists of arbitrary C code, beginning with 
+•/.code. The reason for allowing arbitrary C is that 
+C procedures sometimes have complicated interfaces. 
+They may return results through parameters passed 
+by address, deposit error codes in global variables, re¬ 
+quire #include’d constants to be passed as parame¬ 
+ters, and so on. The body of a Green Card procedure 
+specification allows the programmer to say exactly 
+how to call the procedure, in its native language. 
+
+The C code starts a block, and may thus start with 
+declarations that create local variables. For example: 
+
+•/.code int x, y; 
+
+7. x — foo ( &y, GREY ); 
+
+Here, x and y are declared as local variables. The local 
+C variables declared at the start of the block scope 
+over the rest of the body and the result-marshalling 
+statements. 
+
+The C code may also mention constants from C 
+header files, such as GREY above. Green Card’s 
+*/♦# include directive tells it which header files to in¬ 
+clude (Section 8). 
+
+5.4 Result marshalling 
+
+Functions return their results using a ‘/.result state¬ 
+ment. Side-effecting functions — ones whose result 
+type is ID t — can also use ‘/.fail to specify the fail¬ 
+ure value. 
+
+
+5.4.1 Pure functions 
+
+The '/.result statement takes a single DIS that de¬ 
+scribes how to translate one or more C values back 
+into a single Haskell value. For example: 
+
+O */.fun sin :: Float -> Float 
+‘/.call (float x) 
+
+•/.code ans = sin(x); 
+
+•/♦result (float ans) 
+
+As in the case of the 7call statement, the “float” in 
+the ^result statement is the name of a DIS, chosen as 
+before to coincide with the name of the type. A single 
+DIS, “float”, is used to denote both the translation 
+from Haskell to C and that from C to Haskell, just 
+as a data constructor can be used both to construct 
+a value and to take one apart (in pattern matching). 
+
+All the C variables bound in the ‘/tcall statement, 
+and all those bound in declarations at the start of the 
+
+
+5 
+
+
+body, scope over all the result-marshalling statements 
+(i.e. '/.result and '/.f ail). 
+
+5.4.2 Arbitrary C results 
+
+In a result-marshalling statement an almost arbitrary 
+C expression, enclosed in braces, can be used in place 
+of a C variable name. The above example could be 
+written more briefly like this 6 : 
+
+'/.fun sin :: Float -> Float 
+'/.call (float x) 
+
+'/.result (float {sin(x)}) 
+
+The C expression can neither have assignments nor 
+nested braces as that could give rise to syntactic am¬ 
+biguity (Section 2 elaborates). 
+
+5.4.3 Side effecting functions 
+
+A side effecting function returns a result of type 10 t 
+for some type t. The 10 monad supports exceptions, 
+so Green Card allows them to be raised. 
+
+The result-marshalling statements for a side-effecting 
+call consists of zero or more 7. fail statements, each 
+of which conditionally raise an exception in the 10 
+monad, followed by a single '/.result statement that 
+returns successfully in the 10 monad. 
+
+Just as in Section 5.4, the '/.result statement gives 
+a single DIS that describes how to construct the re¬ 
+sult Haskell value, following successful completion of 
+a side-effecting operation. For example: 
+
+'/.fun windowSize :: Window -> 10 (Int,Int) 
+'/.call (window w) 
+
+'/.code struct Windowlnfo wi; 
+
+7, GetWindowInfo( w, &wi ); 
+
+'/.result (int {wi.x}, int {wi.y}) 
+
+Here, a pairing DIS is used, with two int DISs inside 
+it. The arguments to the int DISs are C record se¬ 
+lections, enclosed in braces; they extract the relevant 
+information from the Windowlnfo structure that was 
+filled in by the GetWindowInfo call 7 . 
+
+The '/.fail statement has two fields, each of which 
+is either a C variable, or a C expression enclosed in 
+braces. The first field is a boolean-valued expression 
+that indicates when the call should fail; the second 
+is a (char *)-valued that indicates what sort of fail¬ 
+ure occurred. If the boolean is true (i.e. non zero) 
+then the cedi fails with a User Error in the IQ monad 
+containing the specified string. 
+
+For example: 
+
+'/.fun fopen :: String -> 10 FileHandle 
+'/.call (string s) 
+
+6 It can be written more briefly still by using automatic 
+fill-in (Section 5.5). 
+
+7 This example also shows one way to interface to C proce¬ 
+dures that manipulate structures. 
+
+
+'/.code f = fopen ( s ); 
+
+7.fail {f == NULL} {errstring(ermo)} 
+
+'/.result (f ileHandle f) 
+
+The assumption here is that fopen puts its error code 
+in the global variable errno, and errstring converts 
+that error number to a string. 
+
+UserErrors can be caught with catch, but exactly 
+which error occurred must be encoded in the string, 
+and parsed by the error-handling code. This is rather 
+slow, but errors are meant to be exceptional. 
+
+5.5 Automatic fill-in 
+
+Any or all of the parameter-marshalling, body, and 
+result-marshalling statements may be omitted. If 
+they are omitted, Green Card will “fill in” plausi¬ 
+ble statements instead, guided by the function’s type 
+signature. The rules by which Green Card does this 
+filling in are as follows: 
+
+• A missing '/.call statement is filled in with a 
+DIS for each curried argument. Each DIS is 
+constructed from the corresponding argument 
+type as follows: 
+
+- A tuple argument type generates a tuple 
+DIS, with the same algorithm applied to 
+the components. 
+
+— All other types generate a DIS function ap¬ 
+plication (Section 6.1). The DIS function 
+name is derived from the type of the cor¬ 
+responding argument, except that the first 
+letter of the type is changed to lower case. 
+The DIS function is applied to as many ar¬ 
+gument variables as required by the arity 
+of the DIS function. 
+
+- The automatically-generated argument 
+variables are named left-to-right as argl, 
+arg2, arg3, and so on. 
+
+• If the body is missing, Green Card fills in a body 
+of the form: 
+
+'/.code r ® /(ai >... ,a n ) ; 
+
+where 
+
+- / is the function name given in the type 
+signature. 
+
+- a\ ... a n are the argument names extracted 
+from the '/.call statement. 
+
+- r is the variable name for the variable used 
+in the '/.result statement. (There should 
+only be one such variable if the body is 
+automatically filled in.) 
+
+• A missing '/.result statement is filled in by a 
+/{result with a DIS constructed from the result 
+type in the same way as for a '/.call. The result 
+variables are named res, res2, res3, and so on. 
+
+• Green Card never fills in '/.fail statements. 
+
+
+6 
+
+
+5.6 Constants 
+
+
+takes one of the following forms: 
+
+
+Some C header files define a large number of constants 
+of a particular type. The /{const statement provides 
+a convenient abbreviation to allow these constants to 
+be imported into Haskell. For example: 
+
+/{const PosixError [EACCES> ENOENT] 
+
+This statement is equivalent to the following */*fun 
+statements: 
+
+y,fun EACCES :: PosixError 
+•/•fun ENOENT :: PosixError 
+
+After the automatic fill-in has taken place we would 
+obtain: 
+
+*/,fun EACCES :: PosixError 
+•/•result (posixError { EACCES >) 
+
+7.fun ENOENT :: PosixError 
+/{result (posixError { ENOENT >) 
+
+Each constant is made available as a Haskell value 
+of the specified type, converted into Haskell by the 
+DIS function for that type. (It is up to the program¬ 
+mer to write a */,dis definition for the function — see 
+Section 6.2.) 
+
+5.7 Prefixes 
+
+In C it is common practise to give all function names 
+in a library the same prefix, to minimize the impact 
+on the common namespace. In Haskell we use quali¬ 
+fied imports to achieve the same result. To simplify 
+the conversion of C style namespace management to 
+Haskell the '/.prefix statement specifies which pre¬ 
+fixes to remove from the Haskell function names. 
+
+module QpenGL where 
+
+‘/•prefix OpenGL 
+•/•prefix gl 
+
+•/.fun OpenGLInit :: Int -> 10 Window 
+7,fun glSphere : : Coord -> Int -> 10 Object 
+
+This would define the two procedures Init and Sphere 
+which would be implemented by calling OpenGLInit 
+and glSphere respectively. 
+
+6 Data Interface Schemes 
+
+A Data Interface Scheme , or DIS, tells Green Card 
+how to translate from a Haskell data type to a C data 
+type, and vice versa. 
+
+6.1 Forms of DISs 
+
+The syntax of DISs is given in Figure 3. It is designed 
+to be similar to the syntax of Haskell patterns. A DIS 
+
+
+1. The application of a DIS function to zero or 
+more arguments. Like Haskell functions, a DIS 
+function starts with a lower-case letter. DIS 
+function are described in Section 6.2. Standard 
+DIS functions include int, float, double; the 
+full set is given in Section 7. For example: 
+
+y,fun foo :: This -> Int -> That 
+•/.call (this x y) (int z) 
+
+/{code r = c_foo( x, y, z ); 
+
+•/•result (that r) 
+
+In this example this and that are DIS functions 
+defined elsewhere. 
+
+2. The application of a Haskell data constructor to 
+zero or more DISs. For example: 
+
+newtype Age = Age Int 
+
+•/•fun foo :: (Age,Age) -> Age 
+
+‘/•call (Age (int x), Age (int y)) 
+
+•/•code r = foo(x,y); 
+
+•/.result (Age (int r)) 
+
+As the y.call line of this example illustrates, 
+tuples are understood as data constructors, in¬ 
+cluding their special syntax. Haskell record syn¬ 
+tax is also supported. For example: 
+
+data Point = Point { px,py::Int > 
+
+*/.fun foo :: Point -> Point 
+
+/{call (Point { px = int x, py = int y >) 
+
+The use of records is also the reason for the re¬ 
+striction that simple C expressions can’t contain 
+assignment. Without this restriction examples 
+like this would be ambiguous: 
+
+•/•result Foo { a = bar x, b - bar y } 
+
+Green Card does not attempt to perform type 
+inference; it simply assumes that any DIS start¬ 
+ing with an upper case letter is a data con¬ 
+structor, and that the number of argument DISs 
+matches the arity of the constructor. 
+
+3 . AC type cast , enclosed in braces, followed by a 
+C variable name. It only makes sense in a ver¬ 
+sion of Haskell extended with unboxed types, 
+because only they need no translation. Exam¬ 
+ples: 
+
+*/,fun foo :: Int# -> 10 () 
+
+•/•call ({int} x) 
+
+
+data T = MkT Int# 
+y,fun baz :: T -> 10 () 
+•/.call (MkT ({int} x)) 
+
+
+7 
+
+
+
+DIS 
+
+dis 
+
+
+dis fun argi ... arg n 
+
+Application 
+
+
+
+
+
+Cons arg\ ...arg n 
+
+Constructor n > 0 
+
+
+
+
+
+Cons{field\ = dis i , . 
+
+. fieldn = dis n } Record n > 1 
+
+
+
+
+
+adis 
+
+
+ADIS 
+
+adis 
+
+
+(dis) 
+
+
+
+
+
+
+tc cexp 
+
+result only 
+
+
+
+
+
+tc var 
+
+
+
+
+
+
+var 
+
+Bound by '/.dis 
+
+
+
+
+
+(dis\ , ... dis n ) 
+
+Tuple n > 0 
+
+Arg 
+
+arg 
+
+
+adis 
+
+
+
+
+
+
+cexp 
+
+
+
+
+
+
+var 
+
+
+DisFun 
+
+dis f un 
+
+->■ 
+
+var 
+
+
+TypeCast 
+
+tc 
+
+
+cexp 
+
+C Expression 
+
+Variable 
+
+var 
+
+
+Var 
+
+Initial letter lower case 
+
+
+Figure 3: DIS grammar 
+
+
+6.2 DIS functions 
+
+It would be unbearably tedious to have to write out 
+complete DISs in every procedure specification, so 
+Green Card supports DIS functions in much the same 
+way that Haskell provides functions. (The big differ¬ 
+ence is that DIS functions can be used in “patterns” 
+— such as '/.call statements — whereas Haskell func¬ 
+tions cannot.) 
+
+Green Card supports two sorts of DIS function: DIS 
+macros (Section 6.2.1) and user-defined DISs (Sec¬ 
+tion 6.2.2). 
+
+6.2.1 DIS macros 
+
+DIS macros allow the programmer to define abbrevi¬ 
+ations for commonly-occurring DISs. For example: 
+
+newtype This = MkThis Int (Float, Float) 
+•/.dis this x y z * MkThis (int x) 
+
+(float y, float z) 
+
+Along with the newtype declaration the programmer 
+can write a %dis function definition that defines the 
+DIS function this in the obvious manner. 
+
+DIS macros are simply expanded out by Green Card 
+before it generates code. So for example, if we write: 
+
+*/*fun f :: This -> This 
+•/.call (this p q r) 
+
+Green Card will expand the call to this: 
+
+*/,fun f :: This -> This 
+
+•/.call (MkThis (int p) (float q, float r)) 
+
+
+(In fact, int and float are also DIS macros defined 
+in Green Card’s standard prelude, so the Xcall line 
+is further expanded to: 
+
+*/*fun f :: This -> This 
+•/.call (MkThis (I# ({int} p)) 
+
+(F# ({float} q), F# ({float} r))) 
+
+The fully expanded calls describe the marshalling 
+code in full detail; you can see why it would be incon¬ 
+venient to write them out literally on each occasion!) 
+
+Notice that DIS macros are automatically bidirec¬ 
+tional; that is, they can be used to convert Haskell 
+values to C and vice versa. For example, we can write: 
+
+•/.fun f :: This -> This 
+
+’/.call (MkThis (int p) (float q, float r)) 
+
+•/.code int a, b, c; 
+
+*/, f ( p, q, r, &a, &b, &c) ; 
+
+•/.result (this a b c) 
+
+The form of DIS macro definitions, given in Figure 3, 
+is very simple. The formal parameters can only be 
+variables (not patterns), and the right hand side is 
+simply another DIS. Only first-order DIS macros are 
+permitted. 
+
+6.2.2 User-defined DISs 
+
+Sometimes Green Card’s primitive DISs (data con¬ 
+structors) are insufficiently expressive. For recursive 
+types, such a s lists, it is obviously no good to write a 
+single data constructor. 
+
+Green Card therefore provides a “trap door” to allow 
+a sufficiently brave programmer to write his or her 
+own marshalling functions. For example: 
+
+
+8 
+
+
+
+
+data T = Zero I Succ T 
+
+Xfun square :: T -> T 
+•/♦call (t (int x)) 
+
+7 # code r = square ( x ); 
+
+•/•result (t (int r)) 
+
+Use of t requires that the programmer define two 
+ordinary Haskell functions, marshall_t to convert 
+from Haskell to C, and unmarshall_t to convert in 
+the other direction. In this example, these functions 
+would have the types: 
+
+marshall_t :: T -> Int 
+unmarshallot :: Int -> T 
+
+The functions must have precisely these names: 
+“marshall.” followed by the name of the DIS, and 
+similarly for unmarshall. Notice that these mar¬ 
+shalling functions have pure types (e.g. marshall.t 
+has type T -> Int rather than T -> 10 Int). Some¬ 
+times one wants to write a marsalling function 
+that is internally stateful. For example, it might 
+pack a [Char] into a ByteArray, by allocating a 
+MutableByteArray and filling it in with the characters 
+one at a time. This can be done using runST, or even 
+unsafePerformIQ. (These cure all GHC-specific com¬ 
+ments; so far as Green Card is concerned it is simply 
+up to the programmer to supply suitably-typed mar¬ 
+shalling functions.) 
+
+Green Card distinguishes user-defined DISs from DIS 
+macros by omission: if there is a DIS macro defi¬ 
+nition for a DIS function f then Green Card treats 
+f as a macro, otherwise it assumes f is a user- 
+defined DIS and generates calls to marshall.t and/or 
+unmarshall.t. 
+
+6.3 Semantics of DISs 
+
+How does Green Card use these DISs to convert be¬ 
+tween Haskell values and C values? We give an in¬ 
+formal algorithm here, although most programmers 
+should be able to manage without knowing the de¬ 
+tails. 
+
+To convert from Haskell values to C values, guided by 
+a DIS, Green Card does the following: 
+
+• First, Green Card rewrites all DIS function ap¬ 
+plications, replacing left hand side by right hand 
+side. 
+
+• Next, Green Card works from outside in, as fol¬ 
+lows: 
+
+- For a data constructor DIS (in either po¬ 
+sitioned or record form), Green Card gen¬ 
+erates a Haskell case statement to take the 
+value apart. 
+
+- For a user-defined DIS, Green Card calls 
+the DIS’s marshall function. 
+
+
+- For a type-cast-with-variable DIS, Green 
+Card does no translation. 
+
+Much the same happens in the other direction, except 
+that Green Card calls the unmarshall function in the 
+user-defined DIS case. 
+
+
+7 Standard DISs 
+
+Figure 4 gives the DIS functions that Green Card pro¬ 
+vides as a “standard prelude”. 
+
+The “T” variants allow the programmer to specify 
+what type is to be used as the C representation type. 
+For example, the int DIS maps a Haskell Int to a C 
+int, whereas intT {FD} maps a Haskell Int onto a C 
+value with type FD. 
+
+7.1 GHC extensions 
+
+Several of the standard DISs involve types that go 
+beyond standard Haskell: 
+
+• Addr is a GHC type large enough to contain a 
+machine address. The Haskell garbage collector 
+treats it as a non-pointer, however. 
+
+• ForeignObj is a GHC type designed to contain 
+a reference to a foreign resource of some kind: 
+a malloc’d structure, a file descriptor, an X- 
+windows graphic context, or some such. The 
+size of this reference is assumed to be that of a 
+machine address. When the Haskell garbage col¬ 
+lector decides that a value of type ForeignObj 
+is unreachable, it calls the object’s finalisation 
+routine, which was given as an address in the 
+argument of the DIS. The finalisation routine is 
+passed the object reference as its only argument. 
+
+• The stable DIS maps a value of any type onto 
+a C int. The int is actually an index into the 
+stable pointer table } which is treated as a source 
+of roots by the garbage collector. Thus the C 
+procedure can effectively get a reference into the 
+Haskell heap. When stable is used to map from 
+C to Haskell, the process is reversed. 
+
+7.2 Maybe 
+
+Almost all DISs work on single-constructor data 
+types. It is much less obvious how to translate values 
+of multi-constructor data types to and from C. Nev¬ 
+ertheless, Green Card does deal in an ad hoc fashion 
+with the Maybe type, because it seems so important. 
+
+The syntax for the maybeT DIS is: 
+maybeT cexp dis 
+
+
+9 
+
+
+
+DIS 
+
+Haskell 
+
+C type 
+
+Comments 
+
+int x 
+
+Int 
+
+int x 
+
+
+intT t x 
+
+Int 
+
+t X 
+
+
+char c 
+
+Char 
+
+char c 
+
+
+charT t c 
+
+Char 
+
+t c 
+
+
+float f 
+
+Float 
+
+float f 
+
+
+floatT t f 
+
+Float 
+
+t f 
+
+
+double d 
+
+Double 
+
+double d 
+
+
+doubleT t d 
+
+Double 
+
+t d 
+
+
+bool b 
+
+Bool 
+
+int b 
+
+0 for False, 1 for True 
+
+boolT t b 
+
+Bool 
+
+t b 
+
+
+addr a 
+
+Addr 
+
+void *a 
+
+An immovable C-land address 
+
+addrT t a 
+
+Addr 
+
+t a 
+
+
+string s 
+
+String 
+
+char *s 
+
+Persistence not required in either direction. 
+
+foreign x f 
+
+ForeignObj 
+
+void *x, 
+void *f () 
+
+f is the free routine; it takes one parameter, 
+namely x, the thing to be freed. 
+
+foreignT t x f 
+
+ForeignObj 
+
+t X, 
+
+void *f() 
+
+
+stable x 
+
+any 
+
+int 
+
+Makes it possible to pass a Haskell pointer 
+to C, and perhaps get it back later, without 
+breaking the garbage collector. 
+
+stableT t x 
+
+any 
+
+t 
+
+
+maybe dis 
+
+Maybe dis 
+
+type of dis 
+
+Converts to and from Maybe’s, with 0 as 
+Nothing 
+
+maybeT cexp dis 
+
+Maybe dis 
+
+type of dis 
+
+Converts to and from Maybe’s 
+
+
+Figure 4: Standard DISs 
+
+
+where dis is any DIS, and cexp is a C expression 
+which represents the Nothing value in the C world. 
+
+In the following example, the function foo takes an 
+argument of type Maybe Int. If the argument value is 
+Nothing it will bind x to 0; if it is Just a it will bind 
+x to the value of a. The return value will be Just r 
+unless r == -1 in which case it will be Nothing. 
+
+7*fun foo :: Maybe Int -> Maybe Int 
+•/♦call (maybeT { 0 } (int x)) 
+
+’/♦code r = foo(x); 
+
+•/.result (maybeT { -1 > (int r)) 
+
+There is also a maybe DIS wich just takes the DIS and 
+defaults to 0 as the Nothing value. 
+
+8 Imports 
+
+Green Card “connects” with code in other modules 
+in two ways: 
+
+• Green Card reads the source code of any mod¬ 
+ules directly imported by the module being pro¬ 
+cessed. It extracts */,dis function definitions 
+(only) from these modules. This provides an 
+easy mechanism for Green Card to import DIS 
+functions defined elsewhere. 
+
+
+The */♦# include directive performs this delayed 
+#include. The syntax is exactly that of a C 
+#include apart from the initial */♦. 
+
+9 Invoking Green Card 
+
+The general syntax for invoking Green Card is: 
+
+green-card [options] [filename] 
+
+Green Card reads from standard input if no filename 
+
+is given. The options can be any of those: 
+
+—version Print the version number, then exit suc¬ 
+cessfully. 
+
+—help Print a usage message listing all available op¬ 
+tions, then exit successfully. 
+
+—verbose Print more information while processing 
+the input. 
+
+—include-dir <directories> Search the directo¬ 
+ries named in the colon (:) separated list for 
+imported files. The directories will be searched 
+in a left to right order. 
+
+—fgc-safe Generates code that can use callbacks to 
+Haskell. This makes the generated code slower. 
+
+
+• It is often important to arrange that a C 
+header file is #included when the C code frag¬ 
+ments in Green Card directives is compiled. 
+
+
+10 
+
+
+
+
+Imports. Should the %dis import mechanism be re¬ 
+cursive? That is, should Green Card read the 
+source of all modules in the transitive closure of 
+the module’s imports? 
+
+Structures. Green Card lacks explicit support for 
+translating structures between C and Haskell. 
+How important is it? What is the “right” way 
+to provide such support? 
+
+Error handling. The error handling provided by 
+*/*f ail is fairly rudimentary. It isn’t obvious how 
+to improve it in a systematic manner. 
+
+• Foreign Function Interface GENerator (FFI- 
+GEN) is a tool that parses C header files and 
+presents an intermediate data representation 
+suitable for writing backends. FFIGEN lives at 
+ht tp: //www. cs. uor egon. edu/~ 1th/f f igen/ 
+
+• Header2Scheme is a program which reads C++ 
+header files and compiles them into C++ code. 
+
+This code implements the back end for a Scheme 
+interface to the classes defined by these header 
+files. Header2Scheme can be found at: 
+
+http: //www-white. media. mit. edu/~kbrussel/Header2Scheme/ 
+
+11 Alternative design choices and av¬ 
+enues for improvement 
+
+Here we summarise aspects of Green Card that are 
+
+less than ideal, and indicate possible improvements. 
+
+DIS function syntax. DIS functions are a bit like 
+Haskell functions (which is why they start with 
+a lower case letter), but they are also very like 
+a “view” of a data type; that is, a pseudo¬ 
+constructor that allows you to build a value or 
+pattern-match on it. Maybe, therefore, DIS 
+functions should start with a capital letter. 
+
+(Then user-defined DISs could start with a plain 
+lower-case letter.) Trivial but important. 
+
+Automatic DIS generation. Pretty much every 
+newtype or single-constructor declaration that 
+is involved in a foreign language call needs a 
+corresponding 7,dis definition. Maybe this 7*dis 
+definition should be automated. On the other 
+hand, there are many fewer data types than pro¬ 
+cedures, so perhaps it isn’t too big a burden to 
+define a 7.dis for each. 
+
+User defined DISs. Should user-defined DISs be 
+explicitly declared, rather than inferred by the 
+omission of a DIS macro definition? Should it be 
+possible for the programmer to specify the name 
+of the marshall/unmarshall functions? (Omit¬ 
+ted for now because not strictly necessary.) 
+
+
+10 Related Work 
+
+• A Portable C Interface for Standard ML of New 
+Jersey , by Lorenz Huelsbergen, describes the 
+implementation of a general interface to C for 
+SML/NJ. 
+
+• Simplified Wrapper and Interface Generator 
+(SWIG) generate interfaces from (extended) 
+ANSI C/C++ function and variable declara¬ 
+tions. It can generate output for Tcl/Tk, 
+Python, Perl5, Perl4 and Guile-iii. SWIG lives 
+at ht tp: //www. cs. Utah. edu/~beazley/SWIG/ 
+
+
+11 
+
+
+
+

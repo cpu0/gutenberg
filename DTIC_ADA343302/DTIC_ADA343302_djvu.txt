@@ -1,0 +1,3877 @@
+PACIFIC SOFTWARE RESEARCH CENTER 
+
+Technical Report 
+
+
+Language Definition DSDL for Hawk 
+
+Pacific Software Research Center 
+April 22, 1998 
+
+CONTRACT NO. F19628-96-C-0161 
+CDRL SEQUENCE NO. [CDRL 0002.4] 
+
+Prepared for: 
+
+USAF 
+
+Electronic Systems Center/AVK 
+
+
+
+
+
+OREGON 
+GRADUATE 
+INSTITUTE OF 
+SCIENCE & 
+TECHNOLOGY 
+
+
+DllC QO/'' 
+
+
+‘.LITY IN8PBC®®* 
+
+
+
+
+Language Definition DSDL for Hawk 
+
+
+Pacific Software Research Center 
+April 22,1998 
+
+CONTRACT NO. F19628-96-C-0161 
+CDRL SEQUENCE NO. [CDRL 0002.4] 
+
+Prepared for: 
+
+USAF 
+
+Electronic Systems Center/AVK 
+Prepared for: 
+
+Pacific Software Research Center 
+Oregon Graduate Institute of Science and Technology 
+PO Box 91000 
+Portland, OR 97291 
+
+
+
+
+
+Microprocessor Specification in Hawk* 
+
+
+John Matthews Byron Cook 
+
+j ohnmQcse.ogi.edu byronOcse.ogi.edu 
+
+
+John Launchbury 
+jl@cse.ogi.edu 
+
+
+Abstract 
+
+Modern microprocessors require an immense invest¬ 
+ment of time and effort to create and verify, from 
+the high-level architectural design downwards. We are 
+exploring ways to increase the productivity of design 
+engineers by creating a domain-specific language for 
+specifying and simulating processor architectures. We 
+believe that the structuring principles used in modern 
+functional programming languages, such as static typ¬ 
+ing, parametric polymorphism, first-class functions, 
+and lazy evaluation provide a good formalism for such 
+a domain-specific language, and have made initial 
+progress by creating a library on top of the functional 
+language Haskell. We have specified the integer sub¬ 
+set of an out-of-order, superscalar DLX microproces¬ 
+sor, with register-renaming, a reorder buffer, a global 
+reservation station, multiple execution units, and spec¬ 
+ulative branch execution. Two key abstractions of this 
+library are the signal abstract data type (ADT), which 
+models the simulation history of a wire, and the trans¬ 
+action ADT, which models the state of an entire in¬ 
+struction as it travels through the microprocessor. 
+
+1 Introduction 
+
+Modern microprocessor technologies have substan¬ 
+tially increased processor performance. For example, 
+pipelining allows a processor to overlap the execution 
+of several instructions at once. With superscalar exe¬ 
+cution, multiple instructions are read per clock cycle. 
+Out-of-order execution, where some instructions that 
+logically come after a given instruction may be ex¬ 
+ecuted before the given instruction, can also greatly 
+
+* Copyright 1998 IEEE. Published in the Proceedings of 
+ICCL’98, May 1998 Chicago, Illinois. Persona! use of this ma¬ 
+terial is permitted. However, permission to reprint/republish 
+this material for advertising or promotion 2 d purposes or for cre¬ 
+ating new collective works for resale or redistribution to servers 
+or lists, or to reuse any copyrighted component of this work in 
+other works, must be obtained from the IEEE. Contact: Man¬ 
+ager, Copyrights and Permissions / IEEE Service Center / 445 
+Hoes Lane / P.O. Box 1331 / Piscataway, NJ 08855-1331, USA. 
+Telephone: Inti. 908-562-3966. 
+
+
+increase processor speed [6]. All of these technologies 
+dramatically increase design complexity. In fact, cre¬ 
+ating and verifying these designs is a significant pro¬ 
+portion of the total microprocessor development life- 
+cycle. As the number of possible gates in future micro¬ 
+processors increeises exponentially, so too does design 
+complexity. 
+
+At OGI, we have developed the Hawk language 
+for building executable specifications of microproces¬ 
+sors, concentrating on the level of micro-architecture. 
+In the long term we plan for Hawk to be a stand¬ 
+alone language. In the meantime we have embedded 
+our language into Haskell, a strongly-typed functional 
+language with lazy (demand-driven) evaluation, first- 
+class functions, and parametric polymorphism [5] [12]. 
+
+The library makes essential use of these features. 
+As an example, we have used Hawk to specify and 
+simulate the integer portion of a pipelined DLX 
+microprocessor[4]. The DLX is a complete micropro¬ 
+cessor and is a widely used model among researchers. 
+Several DLX simulators exist, as well as a version of 
+the Gnu C compiler that generates DLX assembly 
+instructions. The processor includes the most com¬ 
+mon instructions found in commercial RISC proces¬ 
+sors. Our specification, including data and control 
+hazard resolution, is only two pages of Hawk code. A 
+non-pipelined version of the processor was specified in 
+half of a page. 
+
+In this report, we introduce the concepts behind 
+Hawk. Rather than attempting a detailed explana¬ 
+tion of the whole of the DLX with all of its inherent 
+complexity, we have chosen to exhibit the techniques 
+on a considerably simplified model. A corresponding 
+annotated specification of the DLX itself can be found 
+in [13]. 
+
+2 The Hawk Librairy 
+
+We start with a simple example that introduces sev¬ 
+eral functions used in later examples. Consider the 
+resettable counter circuit of Figure 1. 
+
+The reset wire is Boolean valued, while the other 
+
+
+
+reset 
+
+
+
+Figure 1: Resettable Counter. A simple circuit 
+that counts the number of clock cycles between 
+reset signals. 
+
+
+zero. If reset is not asserted, then its output is the 
+value of its bottom input. In either case, selects out¬ 
+put is the output of the entire circuit, as well as the 
+input to the increment component, which simply adds 
+1 to its input. The output of increment is fed into the 
+delay component. A delay component outputs what¬ 
+ever was on its input in the previous clock cycle: it 
+“delays” its input by one cycle. However, on the first 
+clock cycle of the simulation there is no previous in¬ 
+put, so on the first cycle delay outputs whatever is on 
+its init input, which is zero in this circuit. 
+
+2.2 Components 
+
+The components used in the resettable counter are 
+trivial examples of the sorts of things provided by the 
+Hawk library, but let^s look at a specification of each 
+component in turn. 
+
+The simplest component is constant 
+
+
+wires are integer valued. Of course, in silicon, integer¬ 
+valued wires are represented by a vector of Boolean 
+wires, but as a design abstraction, a Hawk user may 
+choose to use a single wire. The circuit counts (and 
+outputs) the number of clock cycles since reset was 
+last asserted. 
+
+
+constant :: a -> Signal a 
+
+The constant function takes an input of any type 
+a, and returns an output of type Signal a, that is, 
+a sequence of values of type a. For every clock cycle, 
+(constant x) always has the same value x. 
+
+The next component is select: 
+
+
+2.1 Signals 
+
+Notice that there is no explicit clock in the diagram. 
+Rather, each wire in the diagram carries a signal (in¬ 
+teger or boolean valued) which is an implicitly clocked 
+value. The output of a circuit only changes between 
+clock cycles. We build signals using an abstract type 
+constructor called Signal. As a mental model we 
+could think of a value of type Signal a as a function 
+from integers to values of type a. 
+
+type Signal a = (Int “> a) 
+
+The integers denote the current time, measured as 
+the number of clock cycles since the start of the simu¬ 
+lation. Circuits and components of circuits are repre¬ 
+sented as functions from signals to signals. This view 
+of signals is used extensively in the hardware verifica¬ 
+tion community [9] [14]. Equivalently, we can think of 
+signals as infinite sequences of values. 
+
+In the resettable counter example above, the 
+constant 0 circuit outputs zero on every clock cycle. 
+The select component chooses between its inputs on 
+each clock cycle depending on the value of reset. If 
+reset is asserted on a given cycle (has value true)y then 
+the output is equal to selecVs top input, in this case 
+
+
+select :: Signal Bool -> 
+
+Signal a -> 
+
+Signal a -> 
+
+Signal a 
+
+This declares select to be a function. In a 
+Hawk declaration, anything to the left of an ar¬ 
+row is a function argument. Thus, the expression 
+(select bs xs ys), where bs is a Boolean signal, 
+and xs and ys are signals of type a, will return an 
+output signal of type a. The values of the output sig¬ 
+nal are drawn from xs and ys, decided each clock tick 
+by the corresponding value of bs. For example, if 
+
+bs = <True,False,True,False,.. .>, 
+xs = <xl,x2,x3,x4,...>, 
+ys = <yl,y2,y3,y4,...> 
+
+then (select bs xs ys) is equal to the signal 
+<xl,y2,x3,y4,. . .>. 
+
+Hawk treats functions as first-class values, allowing 
+them to be passed as arguments to other functions 
+or returned as results. First-class functions allow us 
+to specify a generic lift primitive, which “lifts” a 
+normal function from type a to type b into a function 
+over the corresponding signal types: 
+
+lift :: (a -'> b) -> Signal a -> Signal b 
+
+
+
+
+
+
+
+
+The expression (lift f xs), where 
+xs = <xl,x2,x3,.. is equal to the signal 
+<f xl, f x2, f x3, ...>. 
+
+The increment component is defined in terms of 
+lift: 
+
+increment :; Signal Int -> Signal Int 
+increment xs = lift (+ 1) xs 
+
+Given the xs input signal, increment adds one to 
+each component of xs and returns the result. 
+
+The delay component is more interesting: 
+
+delay ;: a -> Signal a -> Signal a 
+
+This function takes an initial value of type a, and 
+an input signal of type Signal a, and returns a value 
+of type Signal a (the input arguments are in reverse 
+order from the diagram). At clock cycle zero, the ex¬ 
+pression (delay initVal xs) returns initVal. Oth¬ 
+erwise the expression returns whatever value xs had at 
+the previous clock cycle. This function can thus prop¬ 
+agate values from one clock cycle to the next. Note 
+that delay is polymorphic, and can be used to delay 
+signals of any type. 
+
+2.3 Using the components 
+
+Once we have defined primitive signal components like 
+the ones above, we can define the resettable counter: 
+
+reset Counter :: Signal Bool -> Signal Int 
+resetCounter reset = output 
+
+where 
+output = 
+
+select reset 
+
+(constant 0) 
+
+(delay 0 (increment output)) 
+
+The resetCounter definition takes reset as a 
+Boolean signal, and returns an integer signal. The 
+reset signal is passed into select. On every clock cy¬ 
+cle where reset returns True, select outputs 0, oth¬ 
+erwise it outputs the result of the delay function. On 
+the first clock cycle delay outputs 0, and thereafter 
+outputs the result of whatever (increment output) 
+was on the previous clock cycle. The output of the 
+whole circuit is the output of the select function, 
+here called output. Notice that output is used twice 
+in this function: once as the input to increment, and 
+once as the result of the entire function. This corre¬ 
+sponds to the fact that the output wire in Figure 1 is 
+split and used in two places. Whenever a wire is dupli¬ 
+cated in this fashion, we must use a where statement 
+in Hawk to name the wire. 
+
+
+2.4 Recursive Definitions 
+
+There is something else curious about the output vari¬ 
+able. It is being used recursively in the same place it is 
+being defined! Most languages only allow such recur¬ 
+sion for functions with explicit arguments. In Hawk, 
+one can also define recursive data-structures and func¬ 
+tions with implicit arguments, such as the one above. 
+
+If we didn’t have this ability, we would have had to 
+define resetCounter as follows: 
+
+resetCounter reset = output 
+
+where 
+
+output time = 
+
+(select reset 
+
+(constant 0) 
+
+(delay 0 (increment output))) time 
+
+Every time we have a cycle in a circuit, we have to 
+create a local recursive function, passing an explicit 
+time parameter. This breaks the abstraction of the 
+Signal ADT. In fact, in the real implementation of 
+signals, we don’t use functions at all. We use infinite 
+lists instead. Each element of the list corresponds to a 
+value at a particular clock cycle; the first list element 
+corresponds to the first clock cycle, the second element 
+to the second clock cycle, and so on. By storing signals 
+as lazy lists, we compute a signal value at a given 
+clock cycle only once, no matter how many times it is 
+subsequently accessed. 
+
+Haskell allows recursive definitions of abstract data 
+structures because it is a lazy language, that is, it 
+only computes a part of a data structure when some 
+client code demands its value. It is lazy evaluation 
+that allows Haskell to simulate infinite data structures, 
+such as infinite lists. 
+
+3 A Simple Microprocessor 
+
+As we noted in the introduction, the DLX architec¬ 
+ture is too complex to explain in fine detail in an in¬ 
+troductory report. Thus for pedagogical purposes we 
+show how to use similar techniques to specify a sim¬ 
+ple microprocessor called SHAM (Simple HAwk Mi¬ 
+croprocessor). We begin with the simplest possible 
+SHAM architecture (unpipelined), and then add fea¬ 
+tures: pipelining, and a memory-cache. 
+
+The unpipelined SHAM diagram is shown in Fig¬ 
+ure 2. The microprocessor consists of an ALU and a 
+register file. The ALU recognizes three operations: 
+ADD, SUB, and INC. The ADD and SUB operations 
+add and subtract, respectively, the contents of the two 
+ALU inputs. The INC operation causes the ALU to in¬ 
+crement its first input by one and output the result. 
+
+
+
+command srcRegA srcRegB 
+
+
+destReg 
+
+
+
+Figure 2: Unpipelined version of SHAM. 
+
+
+The register file contains eight integer registers, num¬ 
+bered RO through R7. Register RO is hardwired to the 
+value zero, so writes to RO have no eflfect. The reg¬ 
+ister file has one write-port and two read-ports. The 
+write-port is a pair of wires; the register to update, 
+called writeReg^ and the value being written, called 
+writeContents. The input to each read-port is a wire 
+carrying a register name. The contents of the named 
+read-port registers are output every cycle along the 
+wires contentsA and contentsB. If a register is writ¬ 
+ten to and read from during the same clock cycle, the 
+newly written value is reflected in the read-port’s out¬ 
+put. This is consistent with the behavior of most mod¬ 
+ern microprocessor register files. 
+
+SHAM instructions are provided externally; in our 
+drive for simplicity there is no notion of a program 
+counter. Each instruction consists of an ALU opera¬ 
+tion, the destination register name, and the two source 
+register names. For each instruction the contents of 
+the two source registers are loaded into the ALU’s in¬ 
+puts, and the ALU’s result is written back into the 
+destination register. 
+
+3.1 Unpipelined SHAM Specification 
+
+Let us assume we have already specified the register 
+file and ALU, with the signatures below: 
+
+data Reg RO I R1 I R2 I R3 I R4 I R5 | R6 1 R7 
+
+
+regFile :: (Signal Reg, Signal Int) -> 
+
+Signal Reg -> 
+
+Signal Reg -> 
+
+(Signal Int, Signal Int) 
+
+data Cmd = ADD I SUB 1 INC 
+
+alu :: Signal Cmd -> Signal Int -> Signal Int -> 
+Signal Int 
+
+The regFile specification takes a write-port input, 
+two read-port inputs, and returns the corresponding 
+read-port outputs. The alu specification takes a com¬ 
+mand signal and two input signals, and returns a re¬ 
+sult signal. Given these signatures and the previous 
+definition of delay, it is easy in Hawk to specify an 
+unpipelined version of SHAM: 
+
+shaml :: (Signal Cmd,Signal Reg, 
+
+Signal Reg,Signal Reg) ~> 
+
+(Signal Reg,Signal Int) 
+
+shaml (cmd,destReg,srcRegA,srcRegB) = 
+
+(destReg’,aluOutput *) 
+where 
+
+(aluInputA,aluInputB) = 
+regFile (destReg ^, zLluOutput') 
+srcRegA srcRegB 
+
+aluOutput = alu cmd aluInputA aluInputB 
+aluOutput’ = delay 0 aluOutput 
+destReg^ = delay RO destReg 
+
+The definition of shaml takes a tuple of signals rep¬ 
+resenting the stream of instructions, and returns a pair 
+of signals representing the sequence of register assign¬ 
+ments generated by the instructions. The first three 
+lines in the body of shaml read the source register val¬ 
+ues from the register file and perform the ALU opera¬ 
+tion. The next two lines delay the destination register 
+name and ALU output, in effect returning the values of 
+the previous clock cycle. The delayed signals become 
+the write-port for the register file. It is necessary to 
+delay the write-port since modifications to the regis¬ 
+ter file logically take effect for the next instruction, 
+not the current one. 
+
+3.2 Pipelining 
+
+Suppose we wanted to increase SHAM’s performance 
+by doubling the clock frequency. We will assume that, 
+while shaml could perform both the register file and 
+ALU operations within one clock cycle, with the in¬ 
+creased frequency it will take two clock cycles to per¬ 
+form both functions serially. We use pipelining to 
+
+
+
+
+increase the overall performance. While the ALU is 
+working on instruction n, the register file will be writ¬ 
+ing the result of instruction n - 1 back into the appro¬ 
+priate register, and simultaneously reading the source 
+registers of instruction n -f 1. 
+
+But now consider the following sequence of instruc¬ 
+tions, such as: 
+
+R2 <- R1 ADD R3 
+R4 <- R2 SUB R5 
+
+When the ADD instruction is in the ALU stage, the 
+SUB instruction is in the register-fetch stage. But one 
+of the registers that is being fetched (R2), has not been 
+written back into the register file yet, because the ALU 
+is still calculating the result. The SUB instruction will 
+read an out-of-date value for R2. This is an example 
+of a data hazard^ where naive pipelining can produce 
+a result different from the unpipelined version of a 
+microprocessor. To resolve this hazard, we will first 
+add bypass logic to the pipeline, then later abstract 
+away from this added inconvenience. 
+
+Figure 3 contains the diagram of a pipelined version 
+of SHAM with bypass logic. By the time the source 
+operands to the SUB instruction (R2 and R5) are ready 
+to be input into the ALU, the up-to-date value for R2 is 
+stored in the delay circuit between the ALU and the 
+register file’s write-port. The bypass logic uses this 
+stored value of R2 as the input to the ALU, rather 
+than the out-of-date value read from the register file. 
+The bypass logic examines the incoming instructions 
+to determine when this is necessary. The following 
+code contains the Hawk specification: 
+
+sham2 :: (Signal Cmd,Signal Reg, 
+
+Signal Reg,Signal Reg) 
+
+(Signal Reg,Signal Int) 
+
+
+aluOut^ = delay 0 aluOut 
+
+destReg^* = delay RO destReg* 
+
+- Control logic - 
+
+validA = delay True (noHazard srcRegA) 
+
+validB = delay True (noHazard srcRegB) 
+
+noHazard ;: Signal Reg -> Signal Bool 
+noHazard srcReg = 
+
+sigOr (sigEqual destReg^ (constant RO)) 
+(sigNotEqual destReg^ srcReg) 
+
+The first two lines after the where keyword read 
+the contents of the source registers from the register 
+file. The next four lines delay the source register con¬ 
+tents, the ALU command, and the destination register 
+name by one cycle. The two select commands decide 
+whether the delayed values should be bypassed. The 
+decision is made by the Boolean signals validA and 
+validB, which are defined in the control logic section. 
+The next line performs the ALU operation. The last 
+two lines in the data-flow section delay the ALU re¬ 
+sult and the destination register. The delayed result, 
+called aluOut', is written back into the register file in 
+the register named by destReg* \ as indicated in the 
+first two lines of the section. 
+
+The control logic section determines when to by¬ 
+pass the ALU inputs. The signals validA and validB 
+are set to True whenever the corresponding ALU in¬ 
+put is up-to-date. The definition of these signals uses 
+the function noHazard, which tests whether the pre¬ 
+vious instruction’s destination register name matches 
+a source register name of the current instruction. If 
+they do, then the function returns False. The ex¬ 
+ception to this is when the destination register is RO. 
+In this ceise the ALU input is always up>-to-date, so 
+noHazard returns True. 
+
+
+sham2 (cmd,destReg,srcRegA,srcRegB) = 
+
+(destReg ’ ^, aluOut *) 
+where 
+
+(valueA,valueB) = regFile (destReg* ’ ,aluOut 0 
+
+srcRegA srcRegB 
+
+
+valueA * 
+valueB * 
+destReg* 
+cmd* 
+
+
+= delay 0 valueA 
+= delay 0 valueB 
+= delay RO destReg 
+= delay ADD cmd 
+
+
+aluInputA = select validA valueA* aluOut* 
+aluInputB = select validB valueB* aluOut* 
+
+
+aluOut alu cmd* aluInputA aluInputB 
+
+
+3.3 Transactions 
+
+The definition of sham2 highlights a difficulty of many 
+such specifications. Although the data flow section is 
+relatively easy to understand, the control logic section 
+is far from satisfactory. In fact, it often takes nearly as 
+many lines of Hawk code to specify the control logic 
+as it does to specify the data flow, and mistakes in 
+the control logic may not be easy to spot. We need a 
+more intuitive way of defining control logic sections in 
+microprocessors. 
+
+We use a notion of transactions within Hawk to 
+specify the state of an entire instruction as it trav¬ 
+els through the microprocessor (similar in spirit to 
+
+
+
+destReg 
+
+
+command 
+
+
+srcRegA srcRegB 
+
+
+
+Figure 3: Pipelined SHAM. Since the register file and the ALU each now take one clock cycle to 
+complete, we now need Delay circuits. The Delay circuits in turn require us to add Select circuits 
+to act as bypasses. The logic controlling the Select circuits is not shown. 
+
+
+Aagaard and Leeser [1]). A transaction holds an in¬ 
+struction’s source operand values, the ALU command, 
+and the destination operand value. Transactions also 
+record the register names associated with the source 
+and destination operands: 
+
+data Transaction = Trans DestOp Cmd [SrcOp] 
+
+type Destop = Operand 
+type SrcOp = Operand 
+type Operand = (Reg,Value) 
+
+data Value = Unknown I Val Int 
+
+An operand is a pair containing a register and its 
+value. Values can either be “unknown” or they can be 
+known, e.g. Val 7. 
+
+For example, the instruction (R3 <- R2 ADD Rl), 
+when it has completed, would be encoded as shown 
+below (assume that register R2 holds the value 3, and 
+Rl holds 4): 
+
+Trans (R3,Val 7) ADD [(R2,Val 3),(Rl,Val 4)] 
+
+This expression states that register R3 should be 
+assigned the value 7 as a result of adding the contents 
+of register R2 and Rl. 
+
+
+Not all of the register values in a transaction are 
+known in the early stages of the pipeline. When a 
+register name does not have an associated value yet, 
+it is assigned the value Unknown. For example, if the 
+above instruction had not reached the ALU stage yet, 
+then the corresponding transaction would be: 
+
+Trans (R3.Unknown) ADD [(R2,(Val 3)),(Rl,Val 4))] 
+
+Figure 4 shows how a transaction’s values are filled 
+in as it flows through the pipeline. 
+
+3.4 Transaction structure 
+
+In general, the Transaction datatype contains three 
+subfields. The first field holds the destination register 
+name and its current state. The state of a register indi¬ 
+cates the current value for the register at a given stage 
+of the pipeline. Possible state values are Unknown, or 
+(Val k). The second field is the instruction’s ALU 
+operation, in this case the ADD command. The third 
+field holds a list of source operand register names and 
+their corresponding states. In this example, it holds 
+the names and states for the source operands R2 and 
+Rl. 
+
+The instruction (R3 <- R2 ADD Rl), before it en¬ 
+ters the SHAM pipeline, is encoded as the transaction: 
+
+
+
+
+
+
+
+
+
+Input 
+
+
+♦ 
+
+
+
+Figure 4: A transaction as it flows through the 
+pipeline. As the transaction progresses, its 
+operands become more refined, 
+
+Trans (R3,Unknown) ADD [(R2,Unknown), (R1,Unknown)] 
+At this point, none of the register values are known, 
+
+3.5 Changes to handle transactions 
+
+We change the regFile and alu functions so that they 
+take and return transactions: 
+
+regFile :: Signal Treinsaction -> 
+
+Signal Transaction -> 
+
+Signal Transaction 
+
+alu :: Signal Transaction -> 
+
+Signal Transaction 
+
+Because the register file needs to both write new 
+values to the CPU registers and read values from 
+them, the regFile function takes a write-transaction 
+and a read-transaction as inputs. The function ex¬ 
+amines the destination register field of the write- 
+transaction and updates the corresponding register in 
+
+
+the register file. It outputs the read-transact ion, mod¬ 
+ified so that all of the source register fields contain cur¬ 
+rent values from the register file. For example, suppose 
+regFile is applied to the completed write-transaction: 
+
+Trans (Rl,Val 4) INC [{Rl,Val 3)] 
+
+and uses as the read transaction: 
+
+Trans (R3,Unknown) ADD [(R2,Unknown), (Rl,Unknown)] 
+
+Further, assume that register R1 is assigned 20 and 
+R2 is assigned 3 before regFile’s application. Then 
+regFile will update R1 to contain 4 from the write- 
+transaction, and will output a new transaction that 
+is identical to the read-transaction, except that all of 
+the source registers have been assigned current values 
+from the register file: 
+
+Trans (R3,Unknown) ADD [(R2,Val 3),(Rl,Val 4)] 
+
+The revised alu function takes a transaction whose 
+source operands have values, performs the appropriate 
+operation, and outputs a modified transaction whose 
+destination field has been filled in. Thus if the ADD 
+transaction above were given to alu, it would return: 
+
+Trans (R3,Val 7) ADD [(R2,Val 3),(Rl,Val 4)] 
+
+3.6 Unpipelined SHAM 
+
+Using transactions, the unpipelined version of SHAM 
+is even eeisier to specify than it was before. 
+
+shamlTrans :: Signal Transaction -> 
+
+Signal Transaction 
+shamlTrans instr = aluOutput ^ 
+where 
+
+aluinput - regFile aluOutput’ instr 
+aluOutput = alu aluinput 
+aluOutput’ = delay nop aluOutput 
+
+nop = Trans (R0,Val 0) ADD [(R0,Val 0),(R0,Val 0)] 
+
+But the real benefit of transactions comes from 
+specifying more complex micro-architectures, as we 
+shall see next. 
+
+3.7 SHAM2 with Transactions 
+
+Transactions are designed to contain the necessary in¬ 
+formation for concisely specifying control logic. The 
+control logic needs to determine when an instruction’s 
+source operand is dependent on another instruction’s 
+destination operand. To calculate the dependency, the 
+
+
+
+
+
+
+
+source and destination register names must be avail¬ 
+able. The transaction carries these names for each 
+instruction. Because of this additional information, 
+bypass logic is easily modeled with following combi- 
+nator: 
+
+bypass :: Signal Transaction -> 
+
+Signal Transaction -> 
+
+Signal Transaction 
+
+The bypass function usually just outputs its first 
+argument. Sometimes, however, the second argu¬ 
+ment’s destination operand name matches one or more 
+of the first argument’s source operand names. In this 
+case, the source operand’s state values are updated to 
+match the destination operand state value. The up¬ 
+dated version of the first argument is then returned. 
+
+So if at clock cycle n the first argument to bypass 
+is: 
+
+Trans (R4,Unknown) ADD [(R3,Val 12), (R2,Val 4)] 
+
+and the second argument at cycle n is: 
+
+Trans (R3,Val 20) SUB [(R8,Val 2),(Rll,Val 10)] 
+
+then because R3 in the second transaction’s desti¬ 
+nation field matches R3 in the first transaction’s source 
+field, the output of bypass will be an updated version 
+of the first transaction: 
+
+Trans (R4,Unknown) ADD [(R3,Val 20),(R2,Val 4)] 
+
+One special case to bypass’s functionality is when a 
+source register is RO. Since RO is a constant register, it 
+does not get updated. The pipelined version of SHAM 
+with bypass logic is now straightforward. Notice that 
+no explicit control logic is needed, as all the decisions 
+are taken locally in the bypass operations. 
+
+SHAM2Trans :: Signal Transaction -> 
+
+Signal Transaction 
+
+SHAM2Trans instr = aluOutput’ 
+where 
+
+readyInstr = regFile aluOutput* instr 
+ready Instr’ = delay nopTrans ready Instr 
+aluinput = bypass readyinstr’ aluOutput’ 
+aluDutput = alu aluinput 
+aluOutput’ = delay nopTrans aluOutput 
+
+The first line takes instr and fills in its source 
+operand fields from the register file. The filled-in 
+transaction is delayed by one cycle in the second line. 
+In the third line bypass is invoked to ensure that all of 
+the source operands are up-to-date. Finally the trans¬ 
+action result is computed by alu and delayed one cycle 
+so that the destination operand can be written back 
+to the register file. 
+
+
+3.8 Hazards 
+
+There are some microprocessor hazards that cannot 
+be handled through bypassing. For example, suppose 
+we extended the SHAM architecture to process load 
+and store instructions: 
+
+R3 <- MEM[R2] 
+
+MEM[R5] <- R2 
+
+The first instruction above is a load instruction; 
+it loads the contents of the address pointed to by R2 
+intoR3. The second instruction is a store; it stores the 
+contents of R2 into the address pointed to by R5. A 
+block diagram of the extended SHAM architecture is 
+shown in Figure 5. There is now a load/store pipeline 
+stage after the ALU stage. However, this introduces a 
+new problem. Suppose SHAM executes the following 
+two instructions in sequence: 
+
+R2 <- MEH[R1] 
+
+R4 <- R2 ADD R3 
+
+These two instructions have a data hazard, just as 
+before, but we can not use bypassing to resolve it. 
+Bypassing depends on having a value to bypass at the 
+beginning of a clock cycle, but R2’s value won’t be 
+known until the end of the cycle, after the memory 
+contents have been retrieved from the memory cache. 
+To resolve this hazard, we have to stall the pipeline 
+at the register-fetch stage. When the first instruc¬ 
+tion has reached the end of the ALU stage, the second 
+instruction will have reached the end of the register- 
+fetch stage. At this point the delay circuits between 
+the register-fetch stage and the ALU stage are overrid¬ 
+den; on the next clock cycle they instead output the 
+equivalent of a no-op instruction. The register-fetch 
+stage itself re-reads the second instruction on the next 
+clock cycle. In effect, the pipeline stall inserts a no-op 
+instruction between the two instructions involved in 
+the hazard: 
+
+R2 <- MEM[R1] 
+
+NOP 
+
+R4 <- R2 ADD R3 
+
+Now when the ADD instruction is about to be pro¬ 
+cessed by the ALU, the load instruction has already 
+completed the memory stage. R2’s value is held in the 
+pipeline registers after the memory stage, so bypass 
+logic can be used to bring the ALU’s input up-to- 
+date. In order to stall correctly, we have to re-read 
+the second instruction. Thus stalling reduces the per¬ 
+formance of the pipeline. 
+
+
+
+destReg command srcRegA srcRegB 
+
+
+
+Figure 5: Block diagram of extended SHAM 
+pipeline. Each Pipeline Register circuit is 
+made up of multiple Delay and Select circuits. 
+The Select circuits are used for bypassing, en¬ 
+suring that the source operands are up-to-date. 
+
+
+3.9 Hawk Specification of Extended 
+
+SHAM 
+
+In this section we will give more evidence of the simpli¬ 
+fying power of transactions by specifying the extended 
+SHAM architecture. The load/store extension signif¬ 
+icantly complicates the control logic for the SHAM 
+architecture. We shall see that transactions hold up 
+well when we must add stalling logic to the pipeline. 
+
+To start, we need to add the commands LOAD and 
+STORE to the Cmd type: 
+
+data Cmd = ADD | SUB I INC I LOAD I STORE 
+
+We also need to define some additional Hawk cir¬ 
+cuits. The first circuit, defaultDelay, augments the 
+normal delay circuit so that when a stall hazard is 
+detected, the augmented circuit will output a default 
+value on the next clock cycle, rather than its current 
+input value: 
+
+defaultDelay :: Signal Bool -> a -> Signal a -> 
+Signal a 
+
+defaultDelay emitDefault default input = 
+delay default (select emitDefault 
+
+(constant default) 
+input) 
+
+The defaultDelay circuit uses delay to store values 
+between clock cycles. The value it stores for the next 
+clock cycle is default if emitDefault is equal to True 
+on the current cycle, otherwise it stores input. On 
+the first cycle of the simulation defaultDelay always 
+returns default. 
+
+The isLoadTrans circuit returns True whenever its 
+argument signal is a load transaction: 
+
+isLoadTrans :: Signal Transaction -> Signal Bool 
+isLoadTrans ts = lift isLoad ts 
+where 
+
+isLoad (Trans _ cmd „) = (cmd == LOAD) 
+
+Although we previously passed SHAM instruc¬ 
+tions as parameters, we now need to call a function, 
+instrCache, to explicitly retrieve them: 
+
+instrCache :: Signal Bool -> Signal Transaction 
+
+Since the pipeline can stall, we need a way to 
+ask for the same instruction two cycles in a row. 
+The instrCache function takes a Boolean signal 
+and returns the current transaction. Whenever the 
+argument signal is True, then on the next cycle 
+instrCache returns the same transaction as it did for 
+the current clock cycle. Otherwise, it returns the next 
+transaction as normal. 
+
+We also need a circuit that actually performs the 
+loads and stores: 
+
+
+
+
+mem :: Signal Transaction -> Signal Transaction 
+
+On those clock cycles where the input transaction is 
+anything but a load or store transaction, the mem func¬ 
+tion simply returns the transaction unchanged. On 
+loads, mem updates the destination operand of the in¬ 
+put transaction, based on the input load address. On 
+stores, mem updates its internal memory array accord¬ 
+ing to the address and contents given in the input 
+transaction. The destination operand value is set to 
+zero. 
+
+We also define a new Hawk function, transHsizard, 
+that returns True whenever its two transaction argu¬ 
+ments would cause a hazard, if the first transaction 
+preceded the second transaction in a pipeline: 
+
+transHazard :: Signal Transaction -> 
+
+Signal Transaction -> 
+
+Signal Bool 
+
+The extended Hawk specification using transactions 
+is given below: 
+
+SHAMSTrans :; Signal Transaction 
+SHAMSTrans = memOut’ 
+where 
+
+— register-fetch stage — 
+instr = instrCache loadHzd 
+
+readyInstr = regFile memOut* instr 
+readyInstr^ = 
+
+defaultDelay loadHzd nopTrans readyInstr 
+— ALU stage — 
+
+aluin = bypass (bypass readyInstr’ memOut’) 
+aluOut’ 
+
+aluOut = alu aluin 
+
+aluOut’ = delay nopTrans aluOut 
+
+— memory stage — 
+
+memln = bypass aluOut’ memOut’ 
+
+memOut = mem memln 
+
+memOut’ - delay nopTrans memOut 
+
+- Control logic - 
+
+loadHzd = 
+
+sigAnd (isLoadTrans readylnstr’) 
+(transHazard ready Instr’ 
+readyInstr) 
+
+The register-fetch stage retrieves the instruction and 
+fills in its source operands from the register file. The 
+register-fetch pipeline register delays the transaction 
+by one clock cycle, although if there is a load hazard, 
+the register instead outputs a nop-instruction on the 
+
+
+next cycle. The ALU stage first updates the source 
+operands of the stored transaction with the results of 
+the two preceding transactions (memOut’ and aluOut’) 
+by invoking bypass twice. It then performs the cor¬ 
+responding ALU operation, if any, on the transaction 
+and stores it in the ALU-stage pipeline register. The 
+memory stage again updates the stored transaction 
+with the immediately preceding transaction, performs 
+any required memory operation, and stores the trans¬ 
+action. The stored transaction is written back to the 
+register file on the next clock cycle. The control logic 
+section determines whether a load hazard exists for the 
+current transaction, that is, whether the immediately 
+preceding transaction was a load instruction that is in 
+hazard with the current transaction. 
+
+As we can see, the body of the specification remains 
+manageable. The small control logic section to detect 
+load hazards is straightforward and is a minority of 
+the overall specification. In contrast, an equivalent 
+specification of this pipeline where the components of 
+each transaction were explicitly represented contained 
+over three times as many source lines. The lower-level 
+specification’s control section was almost as large as 
+the datafiow section, and not nearly as intuitive. 
+
+We feel the transaction ADT is close to the level 
+of abstraction design engineers use informally when 
+reasoning about microprocessor architectures. 
+
+4 Modelling the DLX 
+
+Using techniques comparable to those described in this 
+report we have modeled several DLX architectures: 
+
+♦ An unpipelined version, where each instruction 
+executes in one cycle. 
+
+• A pipelined version where branches cause a one- 
+cycle pipeline stall. 
+
+♦ A more complex pipelined version with branch 
+prediction and speculative execution. Branches 
+are predicted using a one-level branch target 
+buffer. Whenever the guess is correct, the branch 
+instruction incurs no pipeline stalls. If the guess 
+is incorrect, the pipeline stalls for two cycles. 
+
+• An out-of-order, superscalar microprocessor with 
+speculative execution. The microarchitecture 
+contains a reorder buffer, register alias table, 
+reservation station, and multiple execution units. 
+Mispredicted branches cause speculated instruc¬ 
+tions to be aborted, with execution resuming at 
+the correct branch successor. 
+
+
+
+
+
+
+The microarchitectural specification for the un¬ 
+pipelined DLX is written in a quarter page of uncom¬ 
+mented source code; the most complicated pipelined 
+version takes up just over half a page. 
+
+4.1 Executing the model 
+
+We used the Gnu C compiler that generates DLX as¬ 
+sembly to test our specifications on several programs. 
+These test cases include a program that calculates the 
+greatest common divisor of two integers, and a recur¬ 
+sive procedure that solves the towers of Hanoi puzzle. 
+
+We have not made detailed simulation performance 
+measurements yet. Although we plan to test Hawk 
+on several benchmark programs, we do not expect to 
+break simulation-speed records. Hawk is built on top 
+of a lazy functional language, which imposes some per¬ 
+formance costs. Transactions also perform some run¬ 
+time tests that are “compiled-away” in a lower-level 
+pipeline specification. While it would be nice to get 
+high performance, Hawk is primarily a specification 
+language, and only secondarily a simulation tool. Our 
+main interest is in using Hawk to formally verify mi- 
+croarchitectures, while at the same time retaining the 
+ability to directly execute Hawk programs on concrete 
+test cases. 
+
+5 Related Work 
+
+There are several research areas that bear a relation 
+on this work, in particular, modeling specific appli¬ 
+cation domains with Haskell, and modeling hardware 
+in various programming languages. We will pick an 
+example or two from these two categories. 
+
+Haskell has been used to directly model hardware 
+circuits at the gate level. O’Donnell [10] has devel¬ 
+oped a Haskell library called Hydra that models gates 
+at several levels of abstraction, ranging from imple¬ 
+mentations of gates using CMOS and NMOS pass- 
+transistors, up to abstract gate representations using 
+lazy lists to denote time-varying values. Hydra has 
+been used to teach advanced undergraduate courses on 
+computer design, where students use Hydra to even¬ 
+tually design and test a simple microprocessor. Hydra 
+is similar to Hawk in many ways, including the use of 
+higher-order functions and lazy lists to model signals. 
+However, Hydra does not allow users to define compos¬ 
+ite signal types, such as signals of integers or signals 
+of transactions. In Hydra, these composite types have 
+to be built up as tuples or lists of Boolean signals. 
+While this limitation does not cause problems in an 
+introductory computer architecture course, composite 
+
+
+signal types significantly reduce specification complex¬ 
+ity for more realistic microprocessor specifications. 
+
+There are many other languages for specifying 
+hardware circuits at varying levels of abstraction. 
+The most widely used such languages are Verilog and 
+VHDL. Both of these languages are well suited for 
+their roles as general-purpose, large-scale hardware de¬ 
+sign languages with fine-grained control over many cir¬ 
+cuit properties. Both of these languages are more gen¬ 
+eral than Hawk in that they can model asynchronous 
+as well as synchronous circuits. However, Verilog and 
+VHDL are large languages with complex semantics, 
+which makes circuit verification more difficult. Also, 
+neither of these languages support polymorphic cir¬ 
+cuits, nor higher-order circuit combinators, as well as 
+Hawk. 
+
+The Ruby language, created by Jones and Sheeran 
+[7], is a specification and simulation language based on 
+relations, rather than functions. Ruby is more general 
+than Hawk in that relations can describe more circuits 
+than functions can. On the other hand, existing Ruby 
+simulators require Ruby relations to be causal, i.e. to 
+be implement able as functions. Thus Hawk is equal 
+in expressive power to currently executable Ruby pro¬ 
+grams. In addition, much of Ruby’s emphasis is on cir¬ 
+cuit layout. There are combinators to specify where 
+circuits are located in relation to each other and to 
+external wires. Hawk’s emphasis is on behavioral cor¬ 
+rectness, so we do not need to address layout issues. 
+
+Two other languages that are strongly related are 
+HML [8] and MHDL[2]. HML is a hardware modeling 
+language based on the functional language ML. It also 
+has higher-order functions and polymorphic types, al¬ 
+lowing many of the same abstraction techniques that 
+are used in Hawk, with similar safety guarantees. On 
+the other hand, HML is not lazy, so does not easily al¬ 
+low the recursive circuit specifications that turned out 
+to be key in specifying micro-architectures. The goal 
+of HML is also rather different from Hawk, concen¬ 
+trating on circuits that can be immediately realized 
+by translation to VHDL. 
+
+MHDL is a hardware description language for de¬ 
+scribing analog microwave circuits, and includes an 
+interface to VHDL. Though it tackles a very differ¬ 
+ent part of the hardware design spectrum, like Hawk, 
+MHDL is essentially an extended version of Haskell. 
+The MHDL extensions have to do with physical units 
+on numbers, and universal variables to track frequency 
+and time etc. 
+
+
+
+6 Future Directions 
+
+We have just completed the specification of a super¬ 
+scalar version of DLX, with speculative and out-of- 
+order instruction execution. The use of transactions 
+has scaled well to this architecture; it turns out that 
+superscalar components like reservation stations and 
+reorder buffers are naturally expressed as queues of 
+transactions. 
+
+Beyond this, we intend to push in a number of di¬ 
+rections. 
+
+• We hope to use Hawk to formally verify the cor¬ 
+rectness of microprocessors through the mechan¬ 
+ical theorem prover Isabelle [11]. Isabelle is well- 
+suited for Hawk; it has built-in support for manip¬ 
+ulating higher-order functions and polymorphic 
+types. It also has well-developed rewriting tac¬ 
+tics. Thus simplification strategies for functional 
+languages like partial evaluation and deforesta¬ 
+tion [3] can be directly implemented. 
+
+We also expect that transactions will aid the veri¬ 
+fication process. Transactions make explicit much 
+of the pipeline state needed to prove correctness. 
+In lower-level specifications this data has to be 
+inferred from the pipeline context. 
+
+• We are also working on a visualization tool which 
+will enable the microprocessor engineer to inspect 
+values passing along internal wires. 
+
+• We have made initial progress on formally 
+extracting stand-alone control logic from the 
+transaction-based models of pipelines. Stand¬ 
+alone control logic may be more amenable to con¬ 
+ventional synthesis techniques. 
+
+7 Acknowledgements 
+
+We wish to thank Simon Peyton Jones, Carl Seger, 
+Borislav Agapiev, Dick Kieburtz, and Elias Sinderson 
+for their valuable contributions to this research. 
+
+The authors are supported by Intel Strategic CAD 
+Labs and Air Force Material Command (F19628-93-C- 
+0069). John Matthews recieves support from a grad¬ 
+uate research fellowship with the NSF 
+
+References 
+
+[1] Aagaard, M., and Leeser, M. Reasoning about 
+pipelines with structural hazards. In Second Interna¬ 
+tional Conference on Theorem Provers in Circuit De¬ 
+sign (Bad Herrenalb, Germany, Sept. 1994). 
+
+
+[2] Barton, D. Advanced modeling features of MHDL. In 
+International Conference on Electronic Hardware De¬ 
+scription Languages (Jan. 1995). 
+
+[3] Gill, A., Launchbury, J., and Jones, S. P. A 
+short-cut to deforestation. In ACM Conference on 
+Functional Programming and Computer Architecture 
+(Copenhagen, Denmcirk, June 1993). 
+
+[4] Hennessy, J. L., and Patterson, D. A. Computer 
+Architecture: A Quantitative Approach. Morgan Kauf- 
+mann, 1995. 
+
+[5] Hudak, P., Peterson, J., and Fasel, J. A gentle 
+introduction to Haskell. Available at www.haskell.org, 
+Dec. 1997. 
+
+[6] Johnson, M. Superscalar Microprocessor Design. 
+Prentice Hall, 1991. 
+
+[7] Jones, G., and Sheeran, M. Circuit design in Ruby. 
+In Formal Methods for VLSI Design^ J. Staunstrup, 
+Ed. North-Holland, 1990. 
+
+[8] Ll, Y., and Leeser, M. HML: An innovative hard¬ 
+ware design l 2 inguage £ind its tramslation to VHDL. 
+In Conference on Hardware Design Languages (June 
+1995). 
+
+[9] Melham, T. Abstraction mechainisms for hairdware 
+verification. In VLSI Specification, Verification and 
+Synthesis, G. Birtwhistle and P. A. Subrcihmcinyam, 
+Eds. Kluwer Academic Publishers, 1988. 
+
+[10] O’Donnell, J. From transistors to computer cir- 
+chitecture: Teaching functionaJ circuit specification in 
+Hydra. In Symposium on Functional Programming 
+Languages in Education (July 1995). 
+
+[11] Paulson, L. Isabelle: A Generic Theorem Prover. 
+Springer-Verlag, 1994. 
+
+[12] Peterson, J., and et al. Report on the program¬ 
+ming Icinguage Haskell: A non-strict, purely functional 
+language, version 1.4. Available at www.haskeU.org, 
+Apr. 1997. 
+
+[13] Sinderson, E., and et al. Hawk: A hard¬ 
+ware specification language, version 1. Available at 
+www.cse.ogi.edu/PacSoft/projects/Hawk/, Oct. 1997. 
+
+[14] WiNDLEY, P., AND COE, M. A correctness model 
+for pipelined microprocessors. In Second Interna¬ 
+tional Conference on Theorem Provers in Circuit De¬ 
+sign (Sept. 1994). 
+
+
+
+Specifying superscalar microprocessors in Hawk 
+
+
+Byron Cook, John Launchbury, and John Matthews 
+{byron,j1,j ohnm}Qcse.ogi.edu 
+
+Oregon Graduate Institute 
+
+
+Abstract, Hawk is a language for the specification of microprocessors 
+at the microarchitectural level. In this paper we use Hawk to specify a 
+modem microcirchitecture based on the Intel P6 with features such as 
+speculation, register renaming, and supersccilar out-of-order execution. 
+We show that parametric polymorphism, type-clcisses, higher-order fimc- 
+tions, lazy evaluation, and the state monad are key to Hawk’s concision 
+and clarity. 
+
+
+1 Introduction 
+
+As the performance of cutting edge microprocessors increases, so too does their 
+microarchitectural complexity. For example: 
+
+• A superscalar processor that fetches multiple instructions must cache in¬ 
+structions that cannot be immediately executed. 
+
+• A processor with out-of-order execution must usually record the original 
+instruction sequence for exception handling. 
+
+• A processor that renames registers must allocate and then recycle virtual 
+register names. 
+
+While today’s hardware description languages (HDLs) suffice for simple mi¬ 
+croarchitectures, the features of modern designs are difficult to specify without 
+a richer language. Hawk is a specification language based on Haskell [15] that, 
+for the following reasons, provides a strong foundation for a new generation of 
+HDLs: 
+
+• Parametric polymorphism allows generic specifications to be used in different 
+contexts. 
+
+• Type-classes provide a convenient mechanism for abstracting over instruction 
+sets, register sets, and microarchitectural components. 
+
+• Higher-order functions enable a designer to structure specifications in elegant 
+and concise ways. 
+
+• Lazy evaluation naturally supports the simulation of multiple mutually de¬ 
+pendent streams of instructions and data. 
+
+• The state monad facilitates a disciplined style when specifying components 
+with mutable state. 
+
+
+
+In this paper we explore a Hawk specification of a microarchitecture based 
+on the Intel P6 [4]. We give an overview of the top-level design, and describe in 
+detail our specification of the Reorder Buffer. The purpose of this paper is to 
+show that complex microarchitectures can be formally specified in a clear, concise 
+and intelligible way that facilitates understanding, design review, simulation, and 
+verification. 
+
+We assume the reader is familiar with the basic concepts of functional lan¬ 
+guages and microarchitectural design (such as branch prediction and pipelining). 
+For an in-depth introduction to Haskell, read Hudak, Peterson, and FasePs tuto¬ 
+rial [5]. For more information on microarchitectures, refer to Johnson’s textbook 
+
+The remainder of this paper is organized as follows: in Section 2 we introduce 
+an architecture; in Section 3, we provide an introduction to Hawk; in Section 4 
+we use Hawk to specify the architecture; and in Section 5 we highlight how the 
+features of Hawk are used in the specification. 
+
+2 A modern microarchitecture 
+
+2.1 Machine instruction notation 
+
+Throughout this paper we use the following notation for machine instructions: 
+rl <“ r2 + r3 
+
+The register rl is the destination register or destination operand. Registers r2 
+and r3 are source registers. 
+
+When the contents of a register is known we may choose to pair the register 
+name and its value: 
+
+rl <- (r2,5) + r3 
+
+In this case, 5 is a source register value. 
+
+When an instruction’s destination register value has been computed, we de¬ 
+note this by pairing the destination register with its value: 
+
+(rl,8) <- (r2,5) + (r3,3) 
+
+We sometimes refer to a destination register value as the instruction’s value. 
+
+
+2.2 Superscalar microarchitectures 
+
+In general, superscalar architectures employ aggressive strategies to resolve inter¬ 
+instruction dependencies and mask the latency of memory accesses. These in¬ 
+clude speculative execution, the use of virtual register names, and out-of-order 
+instruction issue. The internal microarchitectures often resemble that of a data¬ 
+flow processor using speculative parallel evaluation. They are thus able to exploit 
+instruction level parallelism to execute sequential, scalar programs. 
+
+
+
+
+
+Other Execution Units 
+
+
+Fig. 1. Microcirchitecttire 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+The focus of this paper is on the speculative, superscalar, out-of-order, regis¬ 
+ter renaming microarchitecture shown in Fig. 1. In the remainder of this section 
+we provide an informal introduction to the architecture. 
+
+A Reorder Buffer (ROB) maintains the sequential programming model of 
+an architecture while instructions are executed out-of-order and in parallel else¬ 
+where in the processor. In Fig. 1 the ROB is shown as the composite of a circular 
+Instruction Queue, a Register Alias Table, and a Register File for the real register 
+set. 
+
+The Instruction Queue (IQ) stores instructions in the order in which they 
+are received from the Instruction Fetch Unit (IFU). The IQ also behaves like a 
+register file for the virtual register set, where the instruction’s position in the IQ 
+is its virtual register name. 
+
+The Register Alias Table (RAT) is an array of virtual register names indexed 
+by the real register set. For a given real register name, r, the RAT contains 
+either the location of the youngest instruction in the IQ using r as a destina¬ 
+tion operand; or nothing, if no instruction in the ROB contains the destination 
+operand r. For example, if the instruction r5 <- r2 + r3 is placed into position 
+vl of the IQ (as in Fig. 2), then the real register r5 is aliased in the RAT to the 
+virtual register vl. If r4 <- r5 + r2 is then inserted into the IQ (Fig. 3), its 
+reference to r5 is updated to vl, and r4 is aliased to v2 in the RAT. 
+
+
+vl 
+
+r5 <- r2 + r3 
+
+r4 
+
+
+v2 
+
+
+r5 
+
+vl 
+
+v3 
+
+
+
+
+Fig. 2. Inserting r5 <'• r2 + r3 into the ROB 
+
+
+vl 
+
+1 r5 <- 
+
+r2 
+
++ r3 
+
+r4 
+
+v2 
+
+v2 
+
+A 
+
+1 
+
+Vl 
+
++ r2 
+
+r5 
+
+vl 
+
+v3 
+
+
+
+
+
+
+Fig. 3. Inserting r4 <- r5 + r2 into the ROB 
+
+
+Each instruction, after it has been placed into the ROB, is passed onto the 
+Reservation Station (RS) to be executed. The RS is a data-flow circuit that can 
+execute instructions out-of-order and in parallel. Upon completion in the RS, an 
+instruction’s value is returned to the ROB and forwarded to other instructions 
+still in the RS. 
+
+
+
+
+2.3 Retiring instructions 
+
+An instruction is retired from the ROB when it is at the front of the IQ and its 
+value has been calculated. To retire an instruction in location v with destination 
+operand r, the ROB must write the instruction’s value to position r in the 
+Register File, and remove the alias from the RAT if r is still aliased to v. 
+
+Why isn’t r always aliased to v? Consider the scenario in Fig. 4, where the 
+ROB contains two instructions with r5 as their destination operand. The virtual 
+register vl is no longer an alias of r5 in the RAT. When retiring the instruction 
+from vl, the alias in the r5 position of the RAT should not be removed. Doing so 
+would remove the unrelated alias from r5 to v3. However, in Fig. 5, because only 
+
+
+
+
+
+rl 
+
+
+
+
+
+r2 
+
+
+
+
+
+r3 
+
+v2 
+
+vl 
+
+{r5,0) 
+
+<- ... 
+
+r4 
+
+v2 
+
+(r3,3) 
+
+<- ... 
+
+r5 
+
+v3 
+
+v3 
+
+(r5,l) 
+
+<- ... 
+
+
+
+Fig. 4. IQ contains two instructions that cilter r5 
+
+
+one instruction contains the destination operand r5, r5 remains aliased to vl. 
+In this case, when retiring instruction vl from the IQ, the alias at the position 
+r5 in the RAT should be erased. 
+
+
+
+
+
+rl 
+
+v3 
+
+
+
+
+r2 
+
+
+
+
+
+r3 
+
+v2 
+
+vl 
+
+(r5,0) 
+
+<- ... 
+
+r4 
+
+v2 
+
+(r3,3) 
+
+<“ . .. 
+
+r5 
+
+vl 
+
+v3 
+
+(rl,l) 
+
+<- ... 
+
+
+
+Fig. 5. IQ contains one instruction that eJters r5 
+
+
+2.4 Example 
+
+To illustrate the microarchitecture in action, we trace the execution of a four 
+instruction program: 
+
+
+r2 <- rl + r3 
+
+
+
+r4 <“ r4 + r2 
+r2 <“ rl + rl 
+rl <- r5 - r3 
+
+Rather than demonstrating the potential performance of the microarchitecture, 
+this example is tailored to show the amount of bookkeeping that the processor 
+must maintain. 
+
+In Fig. 6, execution begins in Cycle 1 with the fetch of four instructions, the 
+last of which requires a different execution unit. In Cycle 2 the fetched instruc¬ 
+tions are inserted into the IQ. Source register references are modified in one of 
+two ways. Either the operand is replaced with a virtual register reference if it 
+is aliased in the RAT, or the register’s value is filled in from the Register File. 
+During Cycle 3 the first and last instructions are executed in parallel. In Cycle 
+4 the ROB begins retiring instructions based on their position in the instruction 
+sequence. Although the first and last instructions have both completed, to main¬ 
+tain the sequential programming model, only the first instruction can be retired. 
+The last instruction remains in the ROB until its predecessors have all been 
+retired. In Cycle 5, v2 is computable because the value of vl has been forwarded 
+to the source operand. In Cycle 6, because instruction v2 has completed, the 
+remaining instructions are retired. 
+
+
+3 The Hawk specification language 
+
+This section introduces concepts and abstractions used in Hawk. At the risk of 
+incompleteness, we will rely on the reader’s intuition to fill in the meanings of 
+functions and syntax that are not described. 
+
+3.1 Signals 
+
+A signal represents a wire, where at each clock cycle the value of a signal may 
+change. For example, a signal could alternate between True and False. Or a 
+signal might contain a series of primes numbers. Informally, we can think of a 
+signal as an infinite sequence where the clock cycle is the index: 
+
+toggle = True, False, True, False, True, False, .... 
+primes = 2, 3, 5, 7, 11, 13, 17, 19, 23, 29, _ 
+
+Like the synchronous language Lustre [3], Hawk provides a built-in signal 
+type and functions to construct and manipulate them. The function constant, 
+from Fig. 7, returns a signal that does not change over time: 
+
+constant 5 = 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, .... 
+
+The function before delays a signal with a list of initial values^: 
+
+[-1,0] ‘before* primes = -1, 0, 2, 3, 5, 7, 11, _ 
+
+^ ‘before* denotes that before is used as cin infix operator 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+constant 
+
+: a “> Signal a 
+
+delay 
+
+: a -> Signal a -> Signal a 
+
+before 
+
+: [a] -> Signal a -> Signal a 
+
+bundle 
+
+: (Signal a,Signal b) ~> Signal (a,b) 
+
+unbundle 
+
+: Signal (a,b) -> (Signal a. Signal b) 
+
+lift 
+
+: (a “> b) -> Signal a ~> Signal b 
+
+
+Fig. 7. Type signature of primitive Signal functions 
+
+
+The function bundle takes a pair of signals and returns a signal of pairs: 
+
+bundle (primes,toggle) = (2,True), (3,False), _ 
+
+The function lift applies its argument to each value in a signal: 
+lift f primes = f 2, f 3, f 5, f 7, f 11, _ 
+
+
+Conditional statements are overloaded for 
+if toggle then primes _ ^ ^ 
+
+else constant 0 ’ ' 
+
+
+signaled expressions. For example: 
+5, 0, 11, _ 
+
+
+Later in this paper we use the function delay, which is defined in terms of 
+before: 
+
+delay x s = [x] ‘before* s 
+So, for example: 
+
+
+delay 6 primes = 6, 2, 3, 5, 7, 11, 13, 17, _ 
+
+
+3.2 Transactions 
+
+Transactions [1] formalize the notation of instructions introduced in Subsec¬ 
+tion 2.1. A transaction is a machine instruction grouped together with its state. 
+This state might include: 
+
+• Operand values. 
+
+• A flag indicating that the instruction has caused an exception. 
+
+• A predicted jump target, if the instruction is a branch. 
+
+• Other obscure information, such as predicted operand values if we choose to 
+implement value locality [12] optimizations. 
+
+Transactions are provided as a library of functions, written in Hawk, for 
+creating and modifying transactions. For example, bypass takes two transactions 
+and builds a new transaction where the values from the destination operands of 
+the first transaction are forwarded to the source operands of the second. If i is 
+the transaction: 
+
+
+(r4,8) <- (r2,4) + (rl,4) 
+
+
+
+
+
+
+and j is the transaction: 
+
+rlO <- (r4,6) + (rl,4) 
+then bypass i j produces the transaction: 
+rlO <“ (r4,8) + (rl,4) 
+
+In our experience, specifications that operate on transactions are more con¬ 
+cise than those that treat instructions and state separately. When designed in 
+this style, a processor fetches a transaction containing only the machine instruc¬ 
+tion which is later refined by the various microarchitectural components until 
+the destination operand value is calculated. Transactions are an example of a 
+user-defined abstraction designed to aid the development of a complex microar¬ 
+chitecture. The concept of an instruction’s local state as it acquires its operands, 
+is executed, and finally retired, is the essential concept of a superscalar processor. 
+Transactions also aid the verification process because they make explicit much 
+of the state needed to prove correctness. In lower-level specifications this data 
+has to be inferred from the context. 
+
+
+4 Specifying the microarchitecture 
+
+Fig. 8 contains the top-level Hawk specification of the microarchitecture in Fig. 1. 
+Using lazy evaluation, a Hawk simulation will solve the specification’s system 
+of mutually dependent equations, producing a computational simulation. The 
+components of the microprocessor are modeled as functions from input signals 
+to output signals. For example, as Fig. 9 illustrates, the ROB is a component 
+with two inputs and four outputs. The inputs and outputs may each represent 
+very wide connections — perhaps enough to move numerous transactions in a 
+single cycle. The arguments and results of the function rob from Fig. 8, 
+
+(retired,ready,n,err) = rob 6 (fetched,computed) 
+
+except for the size parameter, correspond to those in Fig. 9. 
+
+
+4.1 Top-level structural specification 
+
+In Fig. 8 the first equation specifies how transactions are fetched from the in¬ 
+struction memory, mem: 
+
+(instrs,npc) = ifu 5 mem pc err ([5,5] ‘before* n) 
+
+The Instruction Fetch (IFU) function, ifu, uses its first parameter, 5, to deter¬ 
+mine the maximum number of transactions to fetch at each cycle. The IFU re¬ 
+trieves consecutive transactions beginning at the program counter, pc. Initially, 
+during the first and second cycles, 5 transactions are fetched. In later cycles 
+feedback from the ROB, n, is used to determine the number of transactions to 
+fetch. 
+
+Execution begins with the transaction at location 256 in the instruction 
+memory. After the first cycle, the value of pc depends on the location of the 
+
+
+
+
+processor mem = retired 
+where 
+
+(instrs,npc) = ifu 5 mem pc err ([5,5] ‘before* n) 
+pc = delay 256 (if err then lastpc retired else npc) 
+fetched = delay [] (annotate instrs) 
+
+(retired,ready,n,err) = rob 6 (fetched, computed) 
+
+computed - rs (6,execUnits) (delay False err,delay [] ready) 
+
+memU = mob fetched retired 
+
+execUnits = [addU,subU, jmpU,intU,f ltU,memU] 
+
+Fig. 8. Top-level microprocessor specification 
+
+
+previously fetched transaction, and the possibility of a mispredicted branch or 
+exception. In the event of a mispredicted branch or exception, the signal err is 
+set, and the pc comes from the last retired transaction: 
+
+pc = delay 256 (if err then lastpc retired else npc) 
+
+For simplicity we employ a naive branch prediction algorithm — all branch 
+transactions are simply assumed to jump to the next consecutive transaction. 
+The function annotate places this guess into the state of branch transactions: 
+
+fetched = delay [] (annotate instrs) 
+
+The Reservation Station (RS) function, rs, is parameterized on its size and 
+execution units: 
+
+computed = rs (6,execUnits) (delay False err,delay [] ready) 
+
+During the initialization of rs, the execution units are clustered together with 
+a function. The execution units can be pipelined or blocking. Execution units 
+can also complete in multiple clocks. The RS accepts two input signals: an error 
+flag and transactions from the ROB. The transactions computed contains the 
+transactions that are complete and ready to be updated in the ROB. 
+
+4.2 ROB specification 
+
+Whereas the top-level specification of the microarchitecture is easily constructed 
+as a purely functional application of components, the ROB is more complicated. 
+Certainly the ROB could be specified in the applicative style used in Fig. 8. 
+However, at a higher level of abstraction, the ROB can be thought of as a circuit 
+
+
+
+
+ROB 
+
+
+Fetched 
+
+Instnictions 
+
+Retired 
+
+Instructions 
+
+Instructions 
+for the RS 
+
+Computed 
+
+Ins tractions 
+
+from RS 
+
+Space Available 
+
+Branch 
+
+Prediction 
+
+Miss 
+
+
+Fig. 9. Inputs ^lnd outputs of the ROB 
+
+
+that sequences destructive updates on mutable components. Our approach in 
+this paper is to specify the ROB in a behavioral style using imperative language 
+features. In Fig. 10, the specification of the ROB is provided in the state monad 
+and then encapsulated with Hawk’s state thread encapsulation construct runST 
+[9]. The advantage of using runST is that the language guarantees that rob 
+neither depends on nor alters mutable state in other components or an outside 
+environment [10]. We can therefore treat the ROB as a pure function that, on a 
+given input, always returns the same output. 
+
+In Fig. 10, during the beginning of the simulation, the ROB constructs its 
+mutable sub-components (much of this work would be fabricated into the pro¬ 
+cessor) : 
+
+q <- IQ.new n 
+rat <- RAT.new 
+rf <- RF.new 
+
+At each cycle the ROB takes the fetched and computed signals signals 
+cycle(fetched,computed) 
+and performs the following tasks: 
+
+• Update the computed transactions in the queue. For each transaction in the 
+computed list, the function update obtains the virtual register reference from 
+the destination register, and uses it as the index when updating the queue: 
+
+update q computed 
+
+• Insert the fetched transactions into the queue (see Subsection 4.3): 
+
+
+instrs <- insert rat q rf fetched 
+
+
+
+
+
+• Find transactions from the front of the queue that are ready to be retired. If 
+a retired transaction was a mispredicted branch or raised an exception, then 
+only retire the transactions before it (see Subsection 4.4): 
+
+(retired,err) <- retire rat q rf 
+
+• If a retired transaction was a mispredicted branch or raised an exception, 
+then clear the IQ and RAT: 
+
+if err then do {q.clear; rat.clear} 
+
+• Measure the capacity of the queue for the IFU: 
+
+capacity <- q.space 
+
+• If a retired transaction was mispredicted or raised an exception then do not 
+send fetched transactions to the RS: 
+
+let ready = if err then [] else instrs 
+
+• Return the retired transactions, the transactions ready to pass onto the RS, 
+the measured capacity, and the error flag: 
+
+return (retired,ready,capacity,err) 
+
+
+rob n (fetched,computed) 
+
+= runST ( 
+
+
+do { q <- 
+
+IQ.new n 
+
+; rat 
+
+<- RAT.new 
+
+; rf <- RF.new 
+
+; cycle(fetched,computed) 
+
+{ update q computed 
+
+
+instrs <- insert rat q rf fetched 
+(retired,err) <- retire rat q rf 
+if err then do -Cq.clear; rat.clear} 
+capacity <- q.space 
+
+let ready = if err then [] else instrs 
+
+} 
+
+return (retired,ready,capacity,err) 
+
+I- 
+
+) 
+
+Fig. 10. ROB behavioral specification 
+
+
+
+
+
+
+insert rat q rf instrs 
+= foreach t in instrs 
+
+do i (reg,alias) <- q.assignAddr (head (getDestRegs t)) 
+; src <~ mapM (rat.replace) (getSonrce t) 
+
+; rat.write reg alias 
+
+; dest <- mapM (rat.replace) (getDest t) 
+
+; new <- regRead q rf (trans dest (getOp t) src) 
+
+; q.enQueue new 
+; return new 
+} 
+
+Fig, 11. Insertion specification 
+
+
+4.3 Inserting new instructions 
+
+Fig. 11 contains the specification of the function insert. When inserting new 
+transactions into the ROB, insert takes a list of transactions, instrs, and 
+performs the following actions: 
+
+• Calculate the new position in the queue for the transaction: 
+
+(reg,ali2is) <- q.assignAddr (head (getDestRegs t)) 
+
+• Substitute references to real registers with virtual registers in the source 
+operands: 
+
+src <- mapM (rat.replace) (getSource t) 
+
+• Update the RAT: 
+
+rat,write reg alias 
+
+• Substitute the reference from the real destination register to the virtual 
+destination register: 
+
+dest <- mapM (rat.replace) (getDest t) 
+
+• Read real register references: 
+
+new <- regRead q rf (trans dest op src) 
+
+• Enqueue the transactions: 
+
+q.enQueue new 
+
+• Return the updated transactions: 
+
+
+return new 
+
+
+
+
+retire rat q rf 
+
+= do { perhaps <- q.deQueueWhile complete 
+
+; let (retired,err) = hazaurd findErr perhaps 
+; mapM (writeOut rf rat) retired 
+; return (retired,err) 
+
+> 
+
+where findErr t = jmpMiss o exceptionRaised 
+
+jmpMiss t * do { X <- getPC t 
+
+; y <“ getSpecPC t 
+; return (x /= y) 
+
+} 
+
+‘catchEx* False 
+writeOut rf rat t = 
+
+do { let [Reg (Virtual vr real) (Val x)] = getDest t 
+; rf.write real x 
+; a <“ rat.read real 
+
+; do { V <- a ; gueird (v == vr) ; return (rat.remove real) } 
+‘catchEx* return () 
+
+} 
+
+Fig. 12. Retirement specification 
+
+
+4.4 Retiring instructions 
+
+Fig. 12 contains the specification of the function retire. When retiring trans¬ 
+actions from the ROB, retire performs the following actions: 
+
+• Remove transactions from the front of the queue until a transaction is found 
+that has not been computed: 
+
+perhaps <- q.deQueueWhile complete 
+
+• If a branch was mispredicted or an exception was raised then ignore all of 
+the transactions after that transaction: 
+
+let (retired,err) = hazard findErr perhaps 
+
+• Write the values of the destination registers to the Register File : 
+
+mapM (writeOut rf rat) retired 
+
+• Return the retired transactions and a flag indicating a branch miss or raised 
+exception: 
+
+
+return (retired,err) 
+
+
+
+
+
+5 Conclusions 
+
+
+The design of correct superscalar microarchitectures is difficult. The language of 
+discourse must be powerful enough to describe a wide range of processors, and 
+concise enough that designers can maintain intellectual control of their work. 
+Moreover, the language must scale to the designs of the future. In this sec¬ 
+tion we highlight how polymorphism, type-classes, higher-order functions, lazy 
+evaluation and the state monad improve the concision, clarity, and perhaps the 
+provability of our specification. 
+
+
+5.1 Polymorphism 
+
+Many of Hawk’s library functions are polymorphic. For example, delay accepts 
+an argument of type a (where a could be any type), a signal of a, and returns a 
+new signal of a: 
+
+delay :: a -> Signal a -> Signal a 
+In Fig. 8, delay is used on both Booleans and lists of transactions: 
+
+(delay False error, delay [] ready) 
+
+Without parametric polymorphism, a delay function would be required for each 
+specific type. In many specification languages, because the types that can be 
+passed through signals are limited, ad hoc solutions are usually sufficient. How¬ 
+ever, signals in Hawk are unrestricted and therefore must be accompanied by 
+truly polymorphic functions. 
+
+
+5.2 Type-classes 
+
+The RAT, used in Fig. 10, is abstracted over the register set used in the under¬ 
+lying machine language. For example, the function RAT.new is of type: 
+
+RAT.new :: Register r => ST s (RAT s r v) 
+
+This reads ‘Tor any type r that is a register set, RAT.new constructs a new RAT 
+indexable by r”. Because r is an instance of Register, the variables minBound 
+and maxBound are overloaded to the smallest and largest values of r: 
+
+minBound :: Register r => r 
+maxBound :: Register r => r 
+
+RAT. new uses minBound and maxBound to determine the size of the constructed 
+RAT. 
+
+Without type-classes, the RAT would either be useful for only one particular 
+register type, or a number of extra parameters (such as the bounds and compar¬ 
+ison functions) would need to be passed to the functions rob, RAT.new, insert, 
+etc. Type-classes allow us to easily adapt the RAT to other machine languages, 
+such as IA-64 or PowerPC. 
+
+
+
+5,3 Higher-order functions 
+
+
+Higher-order functions allow designs to be parameterized in new and powerful 
+ways. For example, in Fig. 8 the RS is parameterized over a list of execution units. 
+At the start of a simulation, the RS builds a single execution unit by clustering 
+the list of circuits. When testing various microarchitectural configurations, the 
+designer can easily modify the execution units at the top-level. 
+
+We might also want to abstract the RS on the scheduling function: 
+
+computed = rs (6,cluster,[addU,subU,jmpU,mltU]) 
+
+(delay False error,delay [] ready) 
+
+This way we might use the same RS specification in many instantiations with 
+different configurations of scheduling functions and execution units. 
+
+
+5.4 Lazy evaluation 
+
+Without Hawk’s lazy semantics we would not be able to write the dependent 
+equations in Fig. 8. Consider the simple clock circuit in Fig. 13. The design is 
+
+
+
+0 
+
+
+Fig. 13. Clock circuit 
+
+
+easily specified as a Hawk expression where the value depends on itself: 
+clock = delay 0 (clock +1) 
+
+In a strict semantics, the meaning of this expression would be undefined. 
+
+
+5.5 Encapsulated state 
+
+While maintaining the mathematically consistent features of Hawk, such as poly¬ 
+morphism and lazy evaluation, the state monad adds the ability to use mutable 
+state directly rather than encoding state with delays and other lower level sig¬ 
+nal constructs. The use of runST facilitates the safe integration of imperative 
+specifications in an applicative framework. 
+
+
+
+
+6 Future work 
+
+
+Currently, using the Glasgow Haskell Compiler, the simulator derived from the 
+specification in this paper retires 800 instructions per second when executed on 
+a UltraSPARC-1 processor. We hope that to improve performance using domain 
+specific optimizations or compilation to better simulation packages. 
+
+We have not sufficiently explored the synthesis and analysis of Hawk spec¬ 
+ifications. Although Hawk is at a higher level of abstraction than mainstream 
+HDLs from our initial results we believe that, within limits, automatic synthesis 
+is feasible. 
+
+We have just completed a correctness proof of a microarchitecture based on 
+this paper in which the ROB, RS, and IFU are specified axiomatically [8]. We 
+now hope to prove that the ROB, RS, and IFU presented here implement the 
+axioms. 
+
+We hope to use Hawk formally to verify the correctness of microprocessors 
+with a mechanical theorem prover (for example, Isabelle [14]). A theorem proving 
+environment for Hawk must have support for manipulating higher-order func¬ 
+tions and polymorphic types. 
+
+
+7 Related work 
+
+Ruby [7] is a specification language based on relations, rather than functions. 
+Relations can describe more circuits than functions. Much of Ruby’s emphasis 
+is on circuit layout. Ruby provides combinators to specify where circuits are 
+located in relation to each other and to external wires. Hawk’s emphasis is on 
+circuit correctness, so we do not address layout issues. 
+
+Lava is a Haskell library for the specification of Field Programmable Gate 
+Arrays. Lava is intended to be used at a lower level of abstraction than Hawk. 
+Like Ruby, Lava specifications focus much attention on issues related to layout. 
+
+Like Hawk, Lustre [3] and the other reactive synchronous languages (Signal, 
+Esterel, Argos, etc) provide mechanisms for constructing expressions over time- 
+varying domains. However, research on these languages has emphasised reactive 
+features rather than the issues addressed in this paper. 
+
+The Haskell library Hydra [13] allows modeling of gates at several levels of 
+abstraction, ranging from implementations of gates using CMOS and NMOS 
+pass-transistors, up to abstract gate representations using lazy lists to denote 
+time-varying values. Hydra is similar to Hawk in many respects. However com¬ 
+posite signal types, such as signals of integers, must be constructed as tuples or 
+lists of Boolean signals. This restriction severely limits Hydra’s application to 
+the domain of complex microarchitectures. 
+
+HML [11] is a hardware modelling language based on ML. It supports higher- 
+order functions and polymorphic types, allowing many of the same abstraction 
+techniques that are used in Hawk. On the other hand, HML is not lazy, so it does 
+not easily allow the dependent circuit specifications that are key in specifying 
+
+
+microarchitectures in Hawk. Also, HML does not clearly separate its imperative 
+and functional features. 
+
+MHDL [2] is a hardware description language for describing analog microwave 
+circuits, and includes an interface to VHDL. Though it tackles a very different 
+area of the hardware design spectrum, like Hawk, MHDL is essentially an ex¬ 
+tended version of Haskell. The MHDL extensions have to do with physical units 
+on numbers, and universal variables to track frequency, time, etc. 
+
+8 Acknowledgements 
+
+For their contributions to this research, we thank Borislav Agapiev, Mark Aa- 
+gaard, John OTeary, Robert Jones, Todd Austin, and Carl Seger of Intel Cor¬ 
+poration; Elias Sinderson and Neil Nelson of The Evergreen State College; Dick 
+Kieburtz, Jeff Lewis, Sava Krstic, Walid Taha, and Andrew Tolmach of the Ore¬ 
+gon Graduate Institute; Simon Peyton-Jones of the University of Glasgow; and 
+the members of BWERT. 
+
+This research was supported by Intel and Air Force Material Command 
+(F19628-93-C-0069). John Matthews is supported by a fellowship from the Na¬ 
+tional Science Foundation. 
+
+Note: This paper appears in the proceedings of the 1998 Workshop on Formal 
+Techniques for Hardware (Marstrand, Sweden) 
+
+References 
+
+1. Aagaard, M., and Leeser, M. Reasoning about pipelines with structural haz¬ 
+ards. In Second International Conference on Theorem Provers in Circuit Design 
+(Bad HeiTen 2 Jb, Germany, Sept. 1994). 
+
+2. Barton, D. Advanced modeling features of MHDL. In International Conference 
+on Electronic Hardware Description Languages (Jem. 1995). 
+
+3. Caspi, P., Pn.AUD, D., Halbwachs, N., and Plaice, J. Lustre: A declarative 
+language for programming synchronous systems. In Symposium on Principles of 
+Programming Languages (Munich, Germany, Jem. 1987). 
+
+4. Gwennap, L. Intel’s P6 uses decoupled superscalar design. Microprocessor Report 
+9, 2 (1995). 
+
+5. Hudak, P., Peterson, J., and Fasel, J. A gentle introduction to Haskell. 
+Avadlable at www.haskell.org, Dec. 1997. 
+
+6. Johnson, M. Superscalar Microprocessor Design. Prentice Hall, 1991. 
+
+7. Jones, G., and Sheeran, M. Circuit design in Ruby. In Formal Methods for 
+VLSI Design^ J. Staimstrup, Ed, North-HoUcind, 1990. 
+
+8. Krstic, S., Cook, B., Launchbury, J., and Matthews, J. A correctness proof 
+of a speculative, superscalar, out-of-order, renaming micro-architecture. Submitted 
+to 1998 Formal Methods in Computer Aided Design, Apr. 1998. 
+
+9. Launchbury, J., and Jones, S. P. Lazy functioned state threads. In Programming 
+Languages Design and Implementation (Orlando, Florida, 1994), ACM Press. 
+
+10. Launchbury, J., and Sabry, A. Monadic state: Axiomatization and type 
+safety. In International Conference on Functional Programming (Amsterdam, The 
+Netherlands, June 1997). 
+
+
+
+11. Li, Y., and Leeser, M. HML: An innovative hardware design language and its 
+translation to VHDL. In Conference on Hardware Design Languages (June 1995). 
+
+12. Lipasti, M. H. Value Locality and Speculative Execution. PhD thesis, Department 
+of Electrical and Computer Engineering, Carnegie Mellon University, Pittsburgh, 
+PA, 1997. 
+
+13. O’Donnell, J. From transistors to computer aurchitecture: Teaching functioned cir¬ 
+cuit specification in Hydra. In Symposium on Functional Programming Languages 
+in Education (July 1995). 
+
+14. Paulson, L, Isabelle: A Generic Theorem Prover. Springer-Verlag, 1994. 
+
+15. Peterson, J., and et al. Report on the programming language Haskell: A non- 
+strict, purely functional language, version 1.4. Available at www.haskell.org, Apr. 
+1997. 
+
+
+
+A correctness proof of a speculative, superscalar, 
+out-of-order, renaming microarchitecture — 
+extended technical report 
+
+
+Sava Krstic, Byron Cook, John Launchbury, and John Matthews 
+{krstic,byron,j1,j ohnmjOcse.ogi. edu 
+
+Oregon Graduate Institute 
+
+
+Abstract 
+
+Microarchitects are increasingly using techniques such as speculation, regis¬ 
+ter renaming, and superscalar out-of-order execution to make use of instruction- 
+level parallelism. However, the growing complexity of modern microprocessors 
+exacerbates the difficulty of relating them to the simple machines that they em¬ 
+ulate. Flaws found later in lower-level validation are often microarchitectural 
+in nature. 
+
+In this paper we provide high-level mathematical specifications for a basic 
+machine and for a speculative, superscalar, out-of-order, renaming machine 
+based on the Intel P6 microarchitecture. We then prove that the visible outputs 
+of the two machines are equivalent. 
+
+
+1 Introduction 
+
+As the performance of microprocessors increases, so too does their microarchitec¬ 
+tural complexity. Modern architectures employ aggressive strategies to resolve inter¬ 
+instruction dependencies. These include rich combinations of speculative, superscalar, 
+and out-of-order execution with the use of virtual register names. Proving that a mi¬ 
+croarchitecture with these features implements the architecture’s programming model 
+is extremely difficult. However, it is an important aspect of design because flaws found 
+later during lower-level validation are frequently manifestations of errors in the mi¬ 
+croarchitectural specification. 
+
+The limited real use of verification in practice is primarily attributable to the 
+immaturity of the techniques, rather than a lack of desire. Industry is working hard 
+to find formal verification methods that scale to the problem sizes they face. Our 
+paper attempts to address some aspects of this issue 
+
+Our research is based on a fairly detailed model of a P6-like microarchitecture 
+[4, 6] expressed using Hawk [7]. To prove its correctness, we have constructed a more 
+abstract specification in which each major component is axiomatically specified. We 
+are then able to prove that, for any given program, the visible output computed by 
+the microarchitecture is identical to that of the simple reference machine. 
+
+
+1 
+
+
+The model described in this paper implements speculation, prediction, superscalar 
+out-of-order execution, and renaming. Following Intel convention, we will refer to this 
+combination of microarchitectural optimizations as dynamic execution. Actually, our 
+axiomatization does not limit us to a single microarchitecture. The proof is applica¬ 
+ble to any combination of components that satisfy the axioms, so our result should 
+be relatively easily adaptable to other architectures that use elements of dynamic 
+execution, such as the MIPS T5, HP’s PA8000, Digital’s Alpha, etc. 
+
+We believe this approach to demonstrating correctness would be feasible for use 
+in industry. Of course, even the moderately complex model we have here is several 
+orders of magnitude simpler than a commercial design, but the hierarchical nature of 
+the proof is promising. As each design team is developing an RTL description of a 
+component, the particular axioms make explicit the assumptions that other teams can 
+rely on. If these axioms have to change during development then there is opportunity 
+to determine that the global correctness property still holds, and if not, what explicit 
+changes need to be made to other units. 
+
+This paper is organized as follows: we specify a simple machine, provide a spec¬ 
+ification of the dynamic machine, and prove that the microarchitectures are visibly 
+equivalent. 
+
+
+2 Defining correctness: the standard machine 
+
+A microprocessor’s correctness is typically defined by the instruction set architecture 
+(ISA), which gives semantics to each instruction in terms of the machine’s states 
+(register files, caches, etc). We adopt a slightly different perspective, abstracting away 
+the ISA in the concept of a simple standard machine. This decision stems from the 
+fact that top-level specifications of dynamic architectures are largely independent of 
+the concrete ISA. Instead, they are distinguished by the way they treat dependencies 
+and branching in programs, and those essentials are captured in our standard machine. 
+
+Concrete ISAs should be thought of as refinements of the standard machine, and 
+for each such refinement there is a corresponding refinement of the dynamic machine 
+described in the next section. This makes our correctness proof, with some extra 
+work to define refinements, valid for a wide class of ISAs. 
+
+We assume that the standard machine executes a fixed program, so its result can 
+simply be described as a sequence of pairs of the form (instruction, result). Two 
+sorts are needed for this: Pgmidx for indices (addresses) of instructions, and Value 
+for results and operands. We make three assumptions about the standard machine: 
+
+• It executes a sequence of instructions, where each instruction in the sequence is 
+determined by the preceding instruction and its result. 
+
+• The result of any instruction can be computed if the values of the two operands 
+are known. 
+
+• The operands of each instruction are results of some previously executed in¬ 
+structions, or a default value. 
+
+
+2 
+
+
+
+Three functions suflBce to model this situation: 
+
+compute: Pgmidx, Value, Value —>• Value, 
+next: Pgmidx, Value Pgmidx, 
+getSources: Pgmidx, PgmIdxSeq —>■ N + (), N + (), 
+
+where N + () is the set of natural numbers plus a distinguished value (). 
+
+The result of the execution of the standard machine, or the visible ontput, is an 
+infinite sequence 
+
+standcird = (fo, Uo), (* 1 , ^i),... 
+defined inductively by the following axioms. 
+
+
+Axiom SM-1. io = startidx. 
+
+Axiom SM-2. im = next(fTO-i,Um-i), for m > 0. 
+
+Axiom SM-3. Vm = compute(fTO, (vpjUg)), 
+
+where (p, q) = getSources(im 5 (* 1 , • - •, and vq = def aultValue. 
+
+Axiom GS. If getSources(i, (ii,..., im)) = (p, q), then each of p, q is either () or 
+an integer smaller than m. 
+
+
+These axioms assume two constants, the starting instruction startidx G Pgmidx 
+and def aultValue € Value. 
+
+We think of the standard machine as executing one instruction per cycle. Axiom 
+SM-2 states that the function next determines the location of the program counter at 
+cycle m based on the instruction and value from m — 1. So, for example, next(i, v) = 
+i -b 1 for all but branch instructions. Axiom SM-3 states that getSources returns the 
+cycles (p and q) at which the source operands for instruction im are calculated. The 
+value Vm is then defined in terms of the values at cycles p and q. 
+
+The virtue of the standard machine is in its unified treatment of instructions 
+and its use of a small number of functions capable of expressing the inter-instruction 
+relationships which are at the basis of more sophisticated execution algorithms. With 
+this simplicity there comes an important limitation: the standard machine does not 
+have enough specification details to properly model dependencies between instructions 
+that manipulate the memory. These dependencies are established only after address 
+computation, and our getSources is “static” in that respect. 
+
+The standard machine models register dependencies fully. As regards the memory 
+dependencies, it only supports the basic model in which these instructions are done in- 
+order. This is achieved by defining getSources so that each load or store instruction 
+is dependent on the last preceding store. 
+
+
+3 Specifying the dynamic microarchitecture 
+
+In this section we introduce the specification of the dynamic microarchitecture in 
+Figure 1, which is based on the Intel P6 microarchitecture. It is composed of the 
+following components: 
+
+
+3 
+
+
+
+
+
+retired 
+
+
+
+error 
+
+
+Figure 1: Top-level dynamic microarchitecture 
+
+
+Instruction Fetch Unit (IFU). The IFU provides multiple instructions at each 
+clock cycle and sends them to the ROB through the fetched wire. The IFU 
+also adds information to the fetched instructions. For example, since the IFU 
+would typically use branch prediction, each branch instruction in fetched is 
+annotated with its speculative program counter. 
+
+Reorder Buffer (ROB). The ROB maintains the sequential programming model 
+of the ISA while instructions are executed in parallel elsewhere in the processor. 
+In essence the ROB is a queue of instructions. After enqueing instructions 
+from the fetched wire, the ROB passes them on to the Reservation Station 
+through the ready wire. An instruction can be dequeued when its value has 
+been computed in the Reservation Station and all of the instructions that were 
+fetched before it have been dequeued. In the case of a mispredicted branch, 
+the ROB asserts the error signal and returns the program counter to the IFU 
+through the lastRet signal. The visible output of the microarchitecture is the 
+retired wire, which represents the instructions retired at each clock cycle. 
+
+Reservation Station (RS). The RS is the data-flow execution component of the 
+microarchitecture. Instructions placed into the ROB are passed on to the RS 
+through the ready wire. The RS can execute instructions dynamically. Upon 
+completion in the RS, an instruction’s value is forwarded to other instructions 
+still in the RS, and eventually returned to the ROB through the computed wire. 
+
+3.1 Concepts used in the formal specification 
+
+3.1.1 Transactions 
+
+We think of instructions in the execution process as entities which come into being at 
+a certain cycle and evolve thereafter. To formalize those entities, we use the concept 
+of transactions [1, 7]. A transaction is a package of information which (directly or 
+indirectly) contains the identity of the unique instruction it is associated with plus 
+various data contained in the current machine state that are relevant for the execution 
+of that instruction. Pairs (i, v) in the description of the standard machine are a simple 
+example of transactions. In general, the structure of transactions depends on the 
+
+
+4 
+
+
+
+
+
+
+machine being considered and is a matter of choice. Here we use six components; 
+
+Trans = Pgmidx, Pgmidx, Name, Ops, Result, Status. 
+
+The first component is the index of the instruction in the (fixed) program and the 
+second is the index of the speculative next instruction. The Name component pro¬ 
+vides unique identifiers to instructions; we take Name to be the set of positive in¬ 
+tegers, so that the name of an instruction will be its index in the sequence of all 
+fetched instructions. Next we have Result = Value + Name and Ops = Value -H 
+Name, Value -1- Name. Thus, all instructions have two operands, and the sort Value 
+is conveniently extended with Name to include references to values that are not yet 
+computed. This is the essence of register renaming. Finally, Status is the finite set 
+of letters {A, C, D, E, N, R}, abbreviating the words Active, Computed, Dropped, 
+Error, New, and Retired respectively. 
+
+The projections from Trans to its six components will be denoted pc, spc, name, 
+ops, res, and sts respectively. Angle brackets will be used for projections onto several 
+components; for example, (pc, res): Trans Pgmidx, Result. The two operands will 
+be denoted by opl and op2; thus, ops(t) = (opl(t), op2(<)). 
+
+3.1.2 Signals 
+
+Another important concept in the specification is that of signals. A signal represents 
+a wire, where at each clock cycle the value may change. We think of signals as infinite 
+sequences indexed by the clock cycles. If s is a signal, then denotes its element, 
+i.e., the value of s at clock cycle n. 
+
+Particularly convenient in high-level specifications are signals of transactions. 
+Even though a physical wire would never contain a whole transaction, its content 
+is usually associated with a unique transaction. Refinements to lower level specifica¬ 
+tions could replace transaction signals with the relevant data components. 
+
+3.2 Top-level specification and correctness statement 
+
+Recall that the dynamic machine is composed of an IFU, ROB, and RS (Figure 1). 
+The top-level specification of the dynamic machine is given by mutually recursive 
+equations 
+
+
+fetched = ?/u( last Ret, error) 
+
+(retired, ready, lastRet, error) = ro6(f etched, computed) 
+
+computed = rs (ready, error) 
+
+which define the signals fetched, computed, ready, retired, error, and lastRet. 
+The functions ifu, rs and rob modeling the three components of the dynamic machine 
+have the following types (defined formally in 3.2.2): 
+
+ifu: TransSig,BoolSig —>■ TransSeqSig 
+
+rob: TransSeqSig,TransSetSig —> TransSeqSig,TransSetSig,TransSig, BoolSig 
+rs: TransSetSig, BoolSig -> TransSetSig 
+
+
+5 
+
+
+
+h 
+
+I 2 
+
+I 3 
+
+I 4 
+
+h 
+
+/e 
+
+It 
+
+h 
+
+
+cro 
+
+
+
+
+
+
+
+
+
+
+0-1 
+
+^i[i] 
+
+cri(2) 
+
+(7i[3] 
+
+(7i[4] 
+
+
+
+
+
+
+0-2 
+
+<72(1] 
+
+trap] 
+
+trafS] 
+
+<r2i4] 
+
+
+
+
+
+
+<^3 
+
+trail] 
+
+trap] 
+
+trap] 
+
+tr3i4] 
+
+
+
+
+
+
+<74 
+
+< 74 ( 1 ] 
+
+tr4p] 
+
+<74 p] 
+
+<74 p] 
+
+<r4[5] 
+
+t74[6] 
+
+< 74 ( 7 ] 
+
+
+
+
+o-sil] 
+
+crsp] 
+
+crsp] 
+
+t75i4] 
+
+trsp] 
+
+t75i6] 
+
+^5[7] 
+
+trsp] 
+
+
+
+
+I 
+
+I 
+
+: 
+
+• 
+
+1 
+
+1 
+
+I 
+
+
+
+Figure 2: Example history of computational state 
+
+The following sections contain axiomatic specifications for (fu, rs and rob. Later 
+in the paper we prove that any dynamic machine satisfying these specifications re¬ 
+produces the result sequence standard of the standard machine. This is our main 
+theorem. 
+
+Theorem, (pc, res)(retiredi retired 2 • • •) = standard. 
+
+Here retiredi retired 2 • • • is the concatenation of finite sequences retiredi, 
+retired 2 , etc. 
+
+3.2.1 Computational state 
+
+Our approach to proving top-level specifications of complex machines is based on the 
+idea of using transactions to explicitly describe the current state of computation at 
+any cycle. We found it convenient to represent the state of computation at the cycle n 
+as a sequence <t„ = ti, consisting of transactions that have been considered since 
+
+the beginning of computation. Thus, we start with (Tq = 0, and if <t„ = ii,< 2 ) ■ • • lik, 
+then = t'j, ^ 2 , • • •, t'lg, tk+ii‘ •• iti, where the transactions t 2 ,... are descendants 
+of and tk+i,. ..,ti is the package of freshly fetched transactions. Of course, 
+
+= ti is possible for some i; t\ / L means that the computation of the instruction 
+has made progress in the last cycle. It is clear that understanding the passage from 
+(T„ to <7„+i means understanding the way the machine works. In our example, the 
+computational state is conveniently used as the ROB state, but different variations 
+are possible. 
+
+It is appropriate to picture all sequences (Tq, cri,cr 2 ,... as rows of a table, as in 
+the example in Figure 2. Then each column of the table is an infinite sequence 
+
+■ ■ ■ where m corresponds to the cycle when the instruction 
+(/,• in Figure 2) was fetched. This is the personal history of an instruction as it 
+goes through the stepwise computation. A useful observation is that there are only 
+finitely many essentially different possibilities where ^ (T„+i[i]. That is, there 
+are only finitely many “elementary” steps involved in the computation of a single 
+instruction. We make this explicit by using the status letters to describe what stage 
+of computation a transaction is in. If status letters are correctly chosen, then every 
+change from to an+i[i] is recorded in a change of status letter. Thus, the “status 
+words” r„ = sts(<T„) and transitions from t„ to r„+i suffice to present much of the 
+
+
+6 
+
+
+
+qualitative analysis of the computation. 
+
+For example, the status words are always in the form {R, D}*{A, C, E}*N*, which 
+means that the computational state consists of a sequence of retired (R) and dropped 
+(D) instructions followed by a sequence of currently active (A) and computed but not 
+retired (C, E) instructions, followed by a sequence of instructions whose computation 
+in the RS has not yet begun (iV). The ROB axiomatics gives a precise description of 
+what changes can occur in the passage from <7„ to < 7 , 1 + 1 . 
+
+Since the computation of every instruction takes finite time, the axioms should 
+make sure that every sequence <7n[i] for fixed i stabilizes (becomes constant eventu¬ 
+ally). This in turn defines the “limit state” (Too, where croo[i] is defined as the limit 
+of ( 7 „[i] as n -> 00 . The limit state is a convenient way of representing the result 
+of the whole infinite computation. For example, the axioms of the components of 
+the machine should be powerful enough to ensure that every transaction in the limit 
+state is either retired or dropped as part of a mispredicted branch, and also that the 
+subsequence of retired transactions essentially coincides with the result sequence of 
+the standard machine. 
+
+3.2.2 Miscellaneous sorts and notations 
+
+It is convenient to define the sorts TransSeq (sequence of transactions) and TransSet 
+(set of transactions) with a requirement that none of their members can contain two 
+transactions with the same name. We also write the sort TransSeqSig for the sort 
+of signals of TransSeq, and analagously define the sorts TransSetSig and BoolSig. 
+The functions pc, ..., sts extend naturally to TreoisSeq and TransSet; for example, 
+pc(ti • • • in) = pc(ti) • • • pc(t„) and pc{ti,..., = {pc(ti),..., pc(t„)}. 
+
+The constituent sorts and operations of the standard machine will occur in the 
+specification of the dynamic machine as well. We shall also need a default transaction 
+tQ whose only property required is res(t()) = def aultValue. 
+
+Suppose <7 = e TransSeq. If {p,q) = getSources(pc(ti),pc(ti • •-fj-i)) 
+
+we say that tp and tq are the first and the second transaction sources of U in c. If, in 
+addition, ops(t,) = (res(tp), res(t,)), then we say that t, has correct operands in cr. 
+
+We define nextpc(i) = next((pc,res)(<)) and say that a transaction t is faulty if 
+spc(t) ^ nextpc(t). 
+
+We shall use the notation 0 ( 2 ] for the i*** element of the transaction sequence a and 
+a{n) for its element whose name is n. Similarly, for a transaction set S, its member 
+whose name is n will be denoted S{n). The empty sequence and the empty set will 
+be both denoted 0, and the length of a sequence o; will be denoted by la]. 
+
+Two useful functions replace and dif f are defined for both transaction sets and 
+transaction sequences. If each of X and Y is either a transaction set or a transaction 
+sequence, then replace(Jf, T) is obtained from X by replacing elements X{i) with 
+y {i) for every i for which it is possible, and dif f (X, Y) is obtained by removing from 
+X all elements X{i) such that X{i) = Y{i). 
+
+For (7 6 TransSeq and S C Status, define <7'® to be the subsequence of <7 consisting 
+of all transactions whose status belongs to S. We will shorten this notation and, for 
+example, write < 7 ^^ instead of < 7 ^^’^^. Define also cr° = < 7 ^, where S = {R,A,C,E}. 
+
+
+7 
+
+
+
+3.3 IFU specification 
+
+In the IFU axioms below we assume that lastRet, error and fetched are signals 
+satisfying the relation */w(lastRet, error) = fetched. 
+
+Axiom IFU-1. If fetched,! = fetched, = 0 for all i < n, then 
+
+pc(<i) = startidx. 
+
+Axiom IFU-2. If fetched„ = then pc{ti) = spc(f,_i) for every i € 
+
+{2,...,p}. 
+
+Axiom IFU-3. Let m < n, fetched^ = •••<?, fetched„ = and 
+
+fetched,- = 0 for i between m and n. Then: 
+
+(a) If error, is false for all i such that m < i < n, then pc(ti) = spc(^p); 
+
+(b) If i is the smallest integer such that m < i < n and error,- is true, then 
+pc(ii) = nextpc(lastRet,-). 
+
+Axiom IFU-4. For every m there exists n such that n > m and f etched„ ^ 0. 
+
+The axioms are conditions that the function ifu is required to satisfy. Axiom IFU- 
+1 states that when the IFU fetches the first instruction, it will fetch from startidx. 
+Axiom IFU-2 indicates that the IFU fetches “consecutive” instructions, and defines 
+“consecutive” for branch instructions to be the instruction pointed to by the branch’s 
+speculative program counter. Axiom IFU-3 clarifies the relationship between two 
+consecutive non-empty fetches. If the error signal was set at the time of the first 
+fetch or in the meantime, then the first instruction of the second fetch should be 
+the correct successor of the last retired instruction. Otherwise (when there are no 
+errors between the two fetches), speculative fetching continues. Finally, Axiom IFU-4 
+simply states that fetching never ceases. 
+
+3.4 RS specification 
+
+In the RS axioms we assume the signals ready, error, and computed satisfy the equal¬ 
+ity rs(ready, error) = computed. We use two sets contents„ and justComputed„ 
+to describe the state of the RS. The set contents„ is meant to contain the trans¬ 
+actions present in the RS at the n*** cycle, and justComputed,^ corresponds to a 
+subset of computed^ whose elements have “correct” res components. We also need 
+an auxiliary function updtOps: TransSet —> TransSet whose effect is to replace all 
+“reference” operands of the form name(s) with the available values res(s). 
+
+Definition 1. updt0ps(5) = {f{t,S)\t € 5'}, where /:Trans,TransSet Trans 
+is the function defined by: f{t, S) = t' if and only if t and f have the same components 
+except ops, and 
+
+. _ J res(s) ifopl{t) = name(s) for some s € S 
+
+op (^ ) — I opl(f) otherwise 
+
+and similarly for op2. 
+
+
+8 
+
+
+
+
+
+Axiom RS-1. computed^ C | f € coiitents„ and res{t) € Value}. 
+
+Axiom RS-2. For every t E justComputed^ there exists s E contents„ such that 
+res(t) = compute((pc, ops)(s)) and the other components of t are the same as those 
+of s. 
+
+Axiom RS-3. If n > 0, error„_i is false, and the sets of names of transactions in 
+ready„_j and contents„_i are disjoint, then 
+
+contents„ = updtOps(ready„_j U c„_i) \ computed„_i 
+
+where c^-i = replace(contents„_i,justComputed,j_j). In all other cases, 
+
+contents^ = 0. 
+
+Axiom RS-4. If a transaction t belongs to contents„ and if opl(t),op2(t) € 
+Value, then there exists m > n such that contents^ does not contain a transaction 
+whose name is name(t). 
+
+
+Axiom RS-1 states that transactions returned by the RS through the computed 
+signal have no further need of computation. It also constrains the computed signal to 
+contain instructions that have come from somewhere, i.e. the RS cannot create hoax 
+transactions to pass through computed. Axiom RS-2 clarifies the relationship between 
+justComputed^ and contents^. Again, this axiom precludes the RS from creating 
+new transactions with no correspondence to the state of the RS. It also states that 
+the result of a computation in the RS should be equivalent to the result computed in 
+the standard machine. Axiom RS-3 inductively defines the persistent state of the RS. 
+
+If no exception is raised, then the contents at cycle n equals the contents at n — 1, 
+combined with the new instructions sent from the ROB, and minus the instructions 
+computed at n — 1. Also, the results of newly computed transactions are forwarded in 
+the process to those transactions which need them as operands. Finally, Axiom RS-4 
+states that each instruction that is present in the RS and has values as operands will 
+eventually disappear from RS—it will either be passed back through the computed 
+wire, or squashed if error occurs in the future. 
+
+3.5 ROB specification 
+
+We treat the ROB as a state machine by specifying the function 
+
+rob': TransSeq, TrzinsSet, State State, TransSeq, TransSet, Trans, Boolean. 
+
+Precisely, the equality ro6(fetched, computed) = (retired, ready, lastRet, error) 
+holds if and only if, for every n > 0, the equality ro6'(f etched^, computed,^, state„) = 
+(state„+i,retired„,ready„,lastRetn,error„) holds. The axioms below are stated 
+as conditions on f etched,^, computed,^, state„, state^+i, retired,i, ready„, lastRet„, 
+error„. 
+
+As indicated in Subsection 3.2.1, the state of the ROB contains all transactions 
+ever considered. We put them in a sequence respecting the order of fetching. The 
+
+
+9 
+
+
+
+status word sts(cr) of any state a always has a certain form and it is convenient to 
+put that restriction into the sort definition: 
+
+State = {cr € TransSeq | sts{a) € {R, Z)}*{A, C, EYN*}. 
+
+The specification of the ROB uses four auxiliary functions: 
+
+acceptFtchd: State, TransSeqState 
+getOps: State State 
+acceptCptd: State, TreuisSet —> State 
+retire: State —¥ State 
+
+Definition 2. acceptFtchd(cr,a;) = a/?, where \(3\ = 1q;| and for every i such that 
+
+l<i<W\ 
+
+(a) name(/?[i]) = res(;3[i]) = |<t1 + i; 
+
+(b) stsim) = N; 
+
+(c) The remaining components of (3 equal the corresponding components of a. 
+
+Definition 3. getOps(<T) = uj if and only if lo is obtained from a by replacing the 
+first transaction t of ex whose status is N (if it exists) with a transaction t' so that t' 
+has status A and correct operands in u, and has all other components same as t. 
+
+Definition 4. Given S G TransSet and a G State, let S' consist of all transactions 
+t of S whose status letter is modified so that sts(t) is E or C depending on whether 
+t is faulty or not. Define acceptCptd((T, 5) = replace((T, 5'). 
+
+Definition 5. De/ine retire': Status*Status* as follows. For r G Status*, let 
+be the maximal prefix of t which uses only letters R,D. If t = then 
+
+retire'(r) = r^^Rd. If t = t^^EO, then retire'(r) = In all other 
+
+cases, retire'(r) = r. 
+
+Definition 6. retire((T) = u> if and only if sts(a;) = retire'(sts((j)) and all other 
+components of oj are equal to the corresponding components of a. 
+
+
+Axiom ROB-1. The initial state stateo is empty. For every n > 0, there exist 
+1 ^ 1 , ^ 2 ) ^3 € State and integers k >0 and / > 1 such that 
+
+= acceptFtchd(state„, fetched,,) 
+
+6 = getOps''(^°) 
+
+^3 = acceptCptd(^ 2 ,computed„) 
+state„+i = retire'(^ 3 ) 
+
+Axiom ROB-2. With 6?6,6 as in Axiom ROB-1, 
+
+(a) ready„ is the set determined by the sequence diff (^25 6); 
+
+(b) retired^ = diff(state^+i,^ 3 *); 
+
+(c) If retired^ ^ 0, then lastRet„ is the last element in retired,,; 
+
+(d) error„ = true if and only if retired,, ^ 0 and lastRet„ is faulty. 
+
+Axiom ROB-3. If state^J = 0 and state^ 0, then ready„ 0. 
+
+
+10 
+
+
+
+The axiom ROB -1 deserves a detailed explanation. To shorten the notation, let 
+us use <T„ for state„, Tn = sts(<r„), and pn = retired„. We want to look closely 
+at the transitions from (T„ to CTn+i and from t„ to through three intermediate 
+stages. Let Ci? C 2 ) Ca status words of the intermediate states ^ 1 , ^2 and ^3 of 
+
+ROB- 1 . Suppose r„ = Then Ci = where q = |fetched,j|. Note 
+
+that <Tn survives intact as a prefix of ^ 1 . Now (2 — ujA^, for some k (equal 
+to the length of ready,^). Clearly, ^ 2 [*] ^ ^i[*] implies Ci[*] = N and (^ 2 [i] = A. As a 
+result of the next step, (3 = where u' is the result of replacing some 
+
+A’s in a;A* with C or E. Again, every change is recorded in a change of status letter: 
+if ^ 3 [*] 7 ^ 6[*]5 then C 2 [*] = A and Csl*] is C or E. 
+
+The last passage, from ^3 to Tn+i, is the most complicated. If the first letter of u' 
+is not C or E, then (3 = t„+i and ^3 = cr„+i. Otherwise, we can write u' = C’'~^Eu" 
+or w' = where r > 1 and, in the second case, oj" does not begin with C or E. 
+
+Let us call this prefix C^~^E or C'^ of oj' the critical segment of (^3. What happens now 
+is that letters of some prefix of the critical segment get replaced with R. If / < r, that 
+is all that happens, but if / = r and if the critical segment is C''~^E, then, aside from 
+the transformation of the critical segment into a dramatic change occurs to the 
+right of the critical segment—all its letters get replaced with D. This special situation 
+requires a special treatment in many arguments that follow, so we shall refer to n as 
+being singular if the change from cr„ to (Tn+i involves this “flushing” of transactions. 
+Otherwise, n will be called regular. Note that retire<i„ is the subsequence of ^3 
+that corresponds to the subword of Cs that is replaced with iT. We still need to 
+consider the case when / > r, but it brings nothing new, since, as we can easily check, 
+retire^(^ 3 ) = retire'’(^ 3 ) if / > r. Observe finally that cr„+i[i] ^ i^ 3 [i] implies that 
+either r„+i[i] = R and ^ 3 [i] is C or or Tn+i[z] = D and ^ 3 [?] is A, C, E or N. 
+
+
+4 Correctness proof 
+
+So far we have axiomatized the individual units. Now we demonstrate that the 
+axiomatization is sufficient to obtain a global correctness property. 
+
+In addition to shorthands cr„, r„, we will also use pn for retired,!. Recall that our 
+goal is to show (pc,res)(/3oo) = staindard, where pco = P 1 P 2 • • •• 
+
+4.1 State transitions and the limit state 
+
+Lemma 1 (Name is index). Whenever defined, (T„[i] = (r„(i). Consequently, name(cr„) 
+is an initial segment of the sequence of positive integers. 
+
+Proof. This is a matter of checking the property name((T[j]) = i for all states a = cr„. 
+
+The empty state obviously has that property. Arguing by induction, assume <t„ has 
+the property. We use ROB-1 and its notation. The first thing to observe is that ^1 has 
+our property by Definition 2. Then we have name(^i) = name(^ 2 ) = name(^ 3 ) = 
+name(cr„+i), where the three equalities are justified by Definitions 3,4, 6 respectively. 
+Thus, (7„+i has the property considered. □ 
+
+
+11 
+
+
+
+Lemma 2 (Retired). If n is regular, then = cr^^pn. If n is singular, then 
+Pn ^ ^ and = a^^pnSn, for some 8n such that sts(5„) G D*. O 
+
+It follows that (T^^j = cri^Pn and so p^o = limcr^. However, at this point it is not 
+even clear that p^o is an infinite sequence. 
+
+Every change in the four step transition from cr„[z] to <T„+i[i] is reflected in a 
+change of status letter. The following lemma states this precisely. 
+
+Lemma 3 (State transition). If <Tn+i[i] ^ o’nW; then T„+i[i] / T„[f], The arrows 
+in the transition diagram in Figure 3 correspond to all possible pairs (r„[i],r„+i[i]). 
+□ 
+
+
+Lemma 4. e {R,C,E}, then res((7„[i]) € Value. □ 
+
+Lemma 5 (Faulty). IfT„[i] = E thent is faulty, and f/r„[i] = C then is not faulty. 
+
+Proof. Suppose r„[*] is E or C. Let m + 1 be the smallest integer such that Tm+iff] = 
+T„[*] and let t = By Lemma 3, < 7 „[i] and t are at the same time faulty or not. 
+
+If 6 5^2 5 ^3 are the intermediate states in the transition from am to cr„i+i, it follows 
+from the the commentary to ROB -1 that ^ 3 [i] = sts{t) = r„[z] and C 2 [*] = By 
+Lemma 1 , ^ 3 [i] = ^^{i), and, by Definition 4, ^ 3 {i) is obtained from f = computed„j(i), 
+and t is faulty or not depending on whether is C or E. Now t and f are at the 
+same time faulty or not because the passage from ^3 to am+i does not affect the 
+components pc, spc, res in terms of which being faulty is defined. □ 
+
+
+12 
+
+
+
+Lemma 6 (Faulty retired). Suppose t is a transaction occurring in some pn- Then 
+t is faulty if and only if n is singular and t is the last transaction in 
+
+Proof. Referring again to the commentary to ROB-1, sts(/?„) = corresponds to 
+the subword C’'~^E or C"’ of Cs, depending on whether n is singular or regular. The 
+desired result follows then from Lemma 5. □ 
+
+
+Lemma 7 (Error). An integer n is singular if and only if error„ is true. 
+
+Proof. If pn = 0, then n is regular (Lemma 2) and error„ is false (ROB-2). Assume 
+then Pn is non-empty. By ROB-2, we have error„ is true if and only if the last 
+element of pn is faulty. Lemma 6 then finishes the proof. □ 
+
+We turn now to the whole personal history of an instruction as it goes through 
+the execution process, that is, the sequence (Tn{i) for fixed i. Recall that <7n[*] = o’nif) 
+so that the instruction named i remains in the i*** place in all states <7„ in which it 
+occurs. 
+
+The ROB axioms imply that = lcr„| |fetched„|, and it follows then from 
+
+IFU-4 that lim |crn| = oo. Moreover, for any i there exist n such that < i < |(Tn|, 
+
+and thus (Tm[i\ exists if and only if m > n. 
+
+Lemma 8 (Stabilization). For fixed i, the sequence (T„[i] is eventually constant. 
+
+Proof. In view of Lemma 3, it suffices to show that the sequence Tn\i\ is eventually 
+constant. Indeed, the sequence T„[i] corresponds to a (directed) path in the graph of 
+Figure 3, and that graph has no non-trivial loops. □ 
+
+Since each sequence cr„[i] (for fixed i) stabilizes, there exists a limit state <Too = 
+lim<T„. It follows immediately that the sequence r„ of status words has a limit Too, 
+and that Tqo = sts(<Too). Since lim |<t„| = oo, the limit state is an infinite sequence. 
+
+Since is a prefix of an, it follows that limcr)^^ is a prefix of <7oo. We would like 
+to show that the two are in fact equal or, equivalently, that (Too = This means 
+that every transaction is eventually retired or dropped, and we need to derive some 
+results about the interaction between ROB and RS in order to prove that. 
+
+4.2 In the Reservation Station 
+
+From now on we shall use a shorthand Sn for contents„. The first result shows that 
+ROB has information about the contents of RS. 
+
+Lemma 9 (RS-contents). name(S'n) = name(cr;^). 
+
+Proof. We argue by induction, the case n = 0 being trivial since, by definition, 
+both and ao are empty. Assume then the lemma is true for some n. If r? is 
+singular, then Cn+i = 0 because cr„+i = a^^^ (Lemma 2), and contentSn+i = 0 by 
+RS-3 and Lemma 7. It remains to consider the case when n is regular. By RS-1, 
+
+
+13 
+
+
+
+
+computed^ C contents„. By induction, name(5n) C U,<nname(ready.). Since the 
+sets name(ready,) are pairwise disjoint, we obtain from RS-3 that 
+
+naine(5'n+i) = (name(5n) U name(ready„)) \ name(computed„). 
+
+We prove now that name((T;f^j) and name(<T;f) satisfy the same relation. Using 
+the notation of ROB- 1 , we have name(^f') = name(cr;f) by definition of acceptFtchd. 
+Then name (^2 ) = namie(^i^)Uname(ready„) by definition of get Ops. Then name (^3 ) 
+name(^^) \ name(computed,j) by definition of acceptCptd. Finally, name((r^^j) = 
+name (^3 ) because the transition from ^3 to <t„+i only involves status letter changes 
+from C* to i? when n is regular. Thus, 
+
+name(( 7 ;f^.i) = (name(<j^) U name(ready„)) \ name(compute<i,j). □ 
+
+Let span(i) denote the set of all n such that i € •S'n- By the previous lemma, 
+spaji(i) can be viewed as the set of all n such that T„[i] = A. Suppose span(i) 
+is non-empty. Then it is a set of consecutive integers; there exists n such that i € 
+name(ready„), and n -f -1 is the smallest element of sp 2 m(f). The maximal element of 
+speui(z) (if it exists!) is that n for which error„ is true or computed,^ exists. All these 
+facts follow easily from the relation between name(5'„) and name(S'n+i) established 
+in the proof of Lemma 9. 
+
+In view of definition of updtOps and /?5'-axioms, the evolution of a transaction 
+in RS affects only the res and ops components. The following lemma makes this 
+observation more precise. To state it properly, we introduce the concept of RS- 
+status of transactions. We define rs-sts(f) to be a three-letter word xyz, where the 
+€ {n,u}. The letter z is defined to be n if res(t) € Name, and to be v if 
+res(f) G Value. In the same manner, opl(t) and op2(f) determine the values of x 
+and y respectively. 
+
+The formula in the axiom RS-3 implies that there are three steps in the transition 
+from Sn to when n is regular: 
+
+Sn'—> S' = replace(5„, justComputed,^) 
+
+I —> S" = updtOps(ready„ U S') 
+
+I —> Sn+i = S" \ computed,,. 
+
+If one of Sn{i), Sn+i{i) exists and the other does not, that is the responsibility 
+of ready„ or computed,,, as we have already observed. Suppose both exist. Then 
+S'{i) and S"{i) exist and the later is equal to S„+i{i). Thus, if 5„(i) ^ iS'„+i(i), then 
+either S'„(i) S'{%) or S'l^i) ^ (or both, which we will see shortly does not 
+
+happen). Suppose t = and i' = S'{i) are not equal. By definition of replace, 
+
+we have t' € just Computed,,, and the axiom RS-2 implies rs-sts(t') = vxw. Axiom 
+RS -2 also gives us ops(t) = ops(t'), so rs-sts(t) is either vvn or vvv. We will prove 
+that the latter case does not occur. The second case to consider is when t' = S'{i) 
+and t" = Sn+i{i) are non-equal. This is an application of updtOps, and it follows 
+that one or both operands of t' are names and the corresponding operands of t" are 
+values. It follows immediately that one cannot have both t ^ t' ^ t "—one inequality 
+requires t' to have value operands, the other asks for at least one name operand. 
+
+Let us look at the whole set span(i); denote tk = Sk{i)- Suppose m = minspan(i). 
+Then there exists t 6 ready,„_j such that tm has all components equal to those 
+
+
+14 
+
+
+
+
+
+
+Figure 4: Transaction values transition diagram 
+
+
+of t except perhaps ops. Since res(t) = name(t) = i (by definition of ready) it 
+follows that res(tTO) = Consider now two consecutive members and of the 
+sequence ■ As shown in the previous paragraph, if res(t„) ^ res(t„+i), 
+
+then res(/„) is a name (necessarily i), and res(t„+i) is a value. Referring again to 
+the paragraph above, it follows that rs-sts(tn) = 'vvn and rs-sts(<„ 4 .i) = vvv. It 
+also follows that tk = tn+i for all k > n, so ops{tk) 7 ^ ops(ffc+i) is possible only when 
+res(4) = res(4+i) € Name. 
+
+Summarizing, we have the following. 
+
+Lemma 10 (RS-transition). Let t = Sn{i) and t' = Sn+i{i)- Then (pc,spc)(t) = 
+(pc,spc)(t'). The inequality t ^ t' occurs only when rs-sts(t) 7 ^ rs-sts(t'). The 
+transition diagram in Figure 4 describes all possible pairs (rs-sts(t),rs-sts(t')). □ 
+
+
+Corollary 1 . If t,t' are transactions in cr„ and Sn respectively, and if name(t) = 
+name(<'), then (pc,spc)(t) = (pc, spc)(t'). □ 
+
+Now we need to deal with the simultaneous evolution of a transaction and its 
+sources. Suppose spcin(i) is non-empty, let n be its minimum, and to € ready^_i be 
+the element giving rise to 5„(i), as in the paragraph before Lemma 10. By definition 
+of ready, opl(to) is either def aultValue or res(^i[p]) for some p < i determined by 
+the function getSources, where is the first intermediate state between cr„_i and 
+(Jni see ROB-l. Let us say that p is the first source of i, and similarly define the 
+second source of i (if it exists). 
+
+Lemma 11 (Forwarding). Suppose t = Sn{i) and p is the first source of i. 
+
+(a) If Sn{p) does not exist, then opl(<) = res((T„[p]) G Value. 
+
+(b) If s = Snip) ^^ists, then opl(t) = res(s) (which is either in Name or in Valuej. 
+(Analogous results hold for the second source/operands.) 
+
+Proof. The proof is by induction on r? € spaii(*). The difficult part is the initial 
+case n = minspan(i). Let to G ready^_j be as above. Recall that all components 
+of to and t are the same except possibly that some operand of to is in Name, and 
+
+
+15 
+
+
+
+
+the corresponding operand of t is in Value. We consider three cases separately. Let 
+S' = replace(5n_i, justComputed„_j) and S" = updtOps(ready„_j U S'). We have 
+t = S"{i) and opl(t) = res(5''(p)) if S'{p) exists; otherwise opl(f) = opl(fo)- The 
+proof splits into three cases. 
+
+Case 1: opl(t) G Name. We prove that Sn{p) necessarily exists and that opl(t) = 
+p = res(5'n(p)); that will prove the lemma in the case considered. 
+
+First we have opl(f) = opl(^o) = res(^i[p]) = p. We claim that < 7 „[p] = 
+^i[p]. Indeed, ^ 2 [p] = ^i[p] is obvious, and <T„+i[p] ^ ^ 2 [p] possible only if p € 
+name(computed,j). This would imply that res(5„(p)) € Value, and then that 
+res(t) € Value, which is not true. Thus, res(<T„[p]) is not in Value, and by Lemma 4, 
+r„[p] ^ {^, C, FJ}. By definition of ready, sts(^i[p]) ^ D and this implies Tn\p] ^ D, 
+because no new elements with status D arise in transition from cr„_i to <t„ (n — 1 
+is regular as Sn ^ 0). Since r„[i] = A (Lemma 9) and p < i, we have r„[p] 7 ^ N. 
+The only remaining possibility is r„[p] = A, and so s = Sn{p) exists. It remains 
+to prove that res(s) = p. Assume the contrary; then res(s) € Value and 5„_i(p) 
+exists. Moreover, we have either s' = s or s' G justComputed„_j. Now S'(i) = s' 
+and by definition of updtOps, the first operand of i = S"(i) is res(s'), contradicting 
+opl{t) = P- 
+
+Case 2: opl(fo) € Value. Now res(^i[p]) is in Value and so is equal to res((j„_i[p]) = 
+res(cr„[p]). By Lemma 4 r„_i[p] ^ A, so S„-i(p) does not exist. Thus, opl(t) = 
+opl(fo) = res((fi[p]) = res(( 7 „[p]). 
+
+Case 3: opl(t) G Value and opl(^o) € Name. We have opl(/) = res(5'(p)). If 
+p ^ name(computed,j_j), then S'„(p) exists and opl(<) = res(5'(p)) = res(5'„(p)). 
+
+If p G name(computed„_j), then opl(f) = res(computed,j_j(p)). Moreover, Sn{p) 
+does not exist, but res(an[p]) = res(computed,j_j(p)) by Definition 4, so the lemma 
+is true in both cases. 
+
+Suppose now n ^ minspan(z) and the lemma is true for n — 1 . Let t' = Sn-\{i)- 
+If 5'„_i(p) does not exist, then opl(<') = res(cr„_i[p]) G Value, by the induction 
+hypothesis. But then Sn{p) does not exist either, and res(cr„[p]) = res(<T„_i[p]), 
+proving the lemma. 
+
+Suppose now s' = Sn-i{p) exists. By induction hypothesis, opl(f') = res(s'). 
+
+If Snip) exist, then p G name(computed,j_i), and we obtain opl{t) = 
+
+res(cr„[p]) G Value as in the corresponding situation in Case 1 above. Finally, if 
+s = Snip) exists, we either have s = s' which implies opl(f) = opl(t') = res(s') = 
+res(s), or s G justComputed ,^_2 which also implies opl(f) = res(s). □ 
+
+Axiom RS-4 implies that span(i) is finite if for some n both operands of contents,i(z) 
+are in Value. Using the previous lemma one can show that this is true unconditionally. 
+
+Lemma 12 (Span). For every i G N, the set span(z) is finite. 
+
+Proof. We argue by induction on i. Axiom RS-4 implies that span(j) is finite if for 
+some n both operands of 5„(i) are in Value. Suppose that span(y) is finite for all 
+j < i and that 5„(i) has at least one operand in Name, say opl(5'„(i)) = p. By 
+Lemma 11 (a), 5„(p) exists. By induction hypothesis, for some m > n, Smip) does 
+not exist. Then Lemma 11 (a) again implies that opl(5m(i)) is in Value. If both 
+operands of Snii) are in Name, it is clear now that we can take m large enough to 
+ensure that both operands of Smii) are in Value. □ 
+
+
+16 
+
+
+
+4.3 Retiring never stops 
+
+Lemma 13 (No deadlock). One has and so Too is an infinite se¬ 
+
+quence involving only letters R and D. 
+
+Proof. Since is a prefix of (Lemma 2), there exists a limit = limr^^. If 
+is infinite, we are done. So suppose is finite. Then there is a letter X R, D 
+such that r„ = r^^Xun for all large enough n. Denote k = 
+
+Suppose X = A. By Lemma 9, the set contents„ contains a transaction named 
+fc + 1 for all large n, which contradicts Lemma 12. 
+
+Suppose X = N. Then € AT*, so = 0 and cr^ ^ 0 for large n. By ROB-3, 
+we must have ready„ ^ 0 then. From = 0 (implied by we have 
+
+error„ = false, so (t^+i ^ 0 (by proof of Lemma 9), and this contradicts u}n+i G N*. 
+
+Finally, suppose X — C ox X = E. By ROB-1, namely the condition 1^1 there, 
+it follows that an+i[k + 1] = R, which is again a contradiction. □ 
+
+Now we obtain a useful factorization of Coq. Recall from Lemma 2 that = 
+cr^^PnSn, where sts((5„) € D*, and (1) = 0 if ^ is regular, and (2) p„ ^ 0 if n is 
+
+singular. Write tpn — pn^n s-iid note that V’n 0 implies pn ^ 0- Lemma 13 implies 
+that 
+
+(Too = '0lV’2 • • • = (P1<5 i)(/>2^2) • • • 
+
+Since is infinite there are infinitely many nonempty factors and each nonempty 
+■fin begins with a non-empty p„. Consequently, there is no end to retiring: 
+
+Lemma 14 (Retiring). The sequence poo is infinite. □ 
+
+The fetching process defines another natural factorization of aoo- 
+
+O'oo = 4>i4>2 
+
+where fin are simply defined by \fin\ = |fetched„|. 
+
+Lemma 15. (pc,spc)(cr<,o) = (pc,spc}(fetchedlfetched 2 •••)• 
+
+Proo/. It suffices to show (pc,spc)(cr„+i) = (pc,spc)(cr„fetched„). Using the ROB 
+axioms and notation again, our claim follows from a sequence of equalities: (pc, spc)(crnf etched„) 
+(pc,spc)(6) = (pc,spc)(^ 2 ) = (pc,spc)(^ 3 ) = (pc,spc)((7„+i). The third equality 
+follows from Corollary 1. The other three follow easily from definitions. □ 
+
+The two factorizations of (Xoo are related as follows. 
+
+Lemma 16 (Factorizations). Ifn is regular, then fix-•-fin is a prefix o/^i • • • fin-i ■ 
+
+If n is singular, then fix " • fin — fii “ ' fin and Sn contains fin- 
+
+Proof. By Lemma 2, = a^^fin, so fix -" fin = <^n+i- Going back to the tran¬ 
+
+sition process analyzed at the beginning of §6, we can now use the information 
+from Lemma 9 to describe the passage from ^2 to ^3 more precisely. Recall that 
+^2 = and Cs = where u' is obtained from loA’^ by 
+
+
+17 
+
+
+
+replacing some /I’s with C’s or £”s. We claim that these changes in fact occur en¬ 
+tirely within w. The reason is in that the subword A'^ of (2 corresponds to ready^, 
+and the names of transactions in ready„ do not occur among the names of transac¬ 
+tions in computed^. Indeed, using the proof of Lemma 9 and its notation, we have 
+name(coinputed,j) C name(contents,i) C U,<nname(ready-). 
+
+Thus, the critical segment of ^3 is entirely within the image of r„ in ^3, so the 
+suffix of length p+q of Cz does not intersect the critical segment. If n is regular, that 
+implies < |r„| = \<^i\ -!-•*• + |0n-i|* Similarly, if n is singular, it follows that 
+
+the suffix of length p -{■ q of = <7^^ belongs to (J„. The two statements of the 
+lemma immediately follow. □ 
+
+4.4 Axioms of the standard machine 
+
+Proof of SM-1. 
+
+We want to prove pc(poo[l]) = startldx. Let n be the smallest integer such 
+that fetched,! ^ 0- By IFU-1, pc(f) = staxtidx, where t is the first transaction in 
+fetched,!. In view of Lemma 15, (Too begins with a transaction f such that pc(f) = 
+pc(f'), so it suffices to check that t' is in poo- Indeed, t' is the first transaction in the 
+first non-empty so it belongs to pm (see the paragraph after Lemma 13). 
+
+Proof of SM-2. 
+
+Since poo is infinite, what needs to be checked is that pc(t') = next((pc, res)(f)) 
+for any two consecutive transactions t,t' in poo- First we consider the case when t 
+is faulty. By Lemma 6, t is the last element of some p„, where n is singular. Thus, 
+t = lastRet„. By Lemma 16, • • • V’n = • (j>n- Let m be the smallest integer such 
+
+that tpi" •‘ipn = <j>i” ‘<l>m and ^ 0- We claim that every i such that m < i < n 
+is regular. Indeed, if such an i were singular, we would have ipi'-'il’i — 4>i" ‘ 
+(Lemma 16). Since 4*1" ‘^n = •• (j>i, it would follow that tj’i' "i’n = V’l''' V’i? 
+
+which is not true since is not empty. 
+
+As for f, we have that it is the first element of the first non-empty 'ij^j that comes 
+after Since V’l • • • V’n = (f>i" •<l>n, it follows that f is also the first element of 
+the first non-empty (f>k that comes after 4>m- Since n is the smallest singular integer 
+among m, m +1,..., A; — 1, it follows from IFU-3b that pc(f') = nextpc(lastRet„) = 
+nextpc(f), finishing the proof in the case when t is faulty. 
+
+Assume now t is not faulty. Since every transaction of every has a corresponding 
+transaction in computed,^ which differs from it only in the status letter (ROB-1,2), it 
+follows from Lemma 6 that spc(f) = nextpc(f). This reduces our problem to showing 
+that pc(f') = spc(f). If t,t' are consecutive elements of some this is exactly what 
+we get from IFU-2 with the aid of Lemma 15. Now, we do have that t and f are 
+consecutive in aoo = (pi^i)(p2^2) • * because otherwise t would have to be the last 
+element of a p„, where Sn ^ 0, which would mean that n is singular (Lemma 2), 
+and so by Lemma 6, that t is faulty, which is absurd. Thus, the only remaining case 
+to consider is when t is the last in some <j)m and f is the first in </>„, where 0,- = 0 
+for i between m and n. The desired result pc(f') = spc(f) follows from IFU-3a and 
+Lemma 15 provided errors is false for every k such that m < k < n. this last 
+condition does not necessarily hold, so suppose finally that k is the smallest integer 
+
+
+18 
+
+
+in this interval for which errors is true. Thus, k is singular (Lemma 7), so • • • V’fc = 
+4>i---(f)k = 4>m- It follows that t is the last element of x[>k = Pkh, so 4 = 0 
+
+and t = lastRet^;. The axiom IFU-3b applies, so pc(t') = nextpc(lastRet„) = 
+nextpc(t), finishing the proof. 
+
+Proof of SM-3. 
+
+As mentioned above, every transaction of poo has a corresponding transaction in 
+some computed,^ which differs from it only in the status letter. Thus, in view of RS-2, 
+res(t) = compute((pc, ops)(t)) holds for every t in poo- Therefore, to prove that 
+(pc, res)(poo) satisfies SM-3, it suffices only to check that all transactions in poo have 
+correct operands. This amounts to the following two lemmas. 
+
+Lemma 17. If crao\j^ is the first source transaction of cr< 5 o[i] in poo, then p is the first 
+source ofi. (Similarly for the second sources.) 
+
+Proof. Suppose croo[i] belongs to and Then m < n and every k such that 
+m < k < n is regular. For some m' (m < m' < n), the set ready,,^* contains a 
+transaction with name i, and the first source p' of i is determined by this condition: 
+^i[p'] is the first transaction source of ^i[*] in where is the first intermediate step 
+in the transition from am' to am’+i- Since m' is regular, sts(^i) = sts(crm'+i)- The 
+definition of transaction sources depends only on the pc components, so we obtain 
+(using Corollary 1) that am>+i[p'] is the first transaction source of am>+i[i] in (^m'+i' 
+Since all numbers between m' and n are regular, we obtain, arguing by induction, that 
+aklp'] is the first transaction source of ak[i\ in a^. for every k such that m' < k < n. 
+Since sts((T„[i]) = R, and a^ is a prefix of ctoo, it follows that aoo\p'] is the first 
+transaction source of croo[i] in = poo- Thus, p = p', proving the lemma. □ 
+
+
+Lemma 18 . If aoo\p\ and <Joo[*] in poo and if p is the first source of i, then 
+opl(croo[?]) = res((Too[p]). (Similarly for the second source/operand.) 
+
+Proof. Let m and be such that Sm{p) G computed,,^ and Sn{p) € computed,^. We 
+have res(croo[i]) = res(S'„(i)) and ops(<Too[p] = ops{Sm{p)), so it suffices to prove 
+that opl(5'n(*)) = res(5m(p)). If m < n, then res(o-„[p]) = res{Sm{p)) and the 
+result follows from Lemma 11(a). If m > n then 5„(p) exists, and by Lemma 11(b), 
+res(a-„[p]) = res(5'n(p)). Since res(5„(p)) is in Value, it must be equal to res(5'TO(p)), 
+and again the desired result follows. □ 
+
+
+5 Related work 
+
+Burch and Dill’s seminal paper [2] developed the concept of a pipeline flushing abstrac¬ 
+tion function to prove an equivalence between an ISA and a pipelined implementation. 
+Any instructions in flight are made to complete by an appropriate insertion of null 
+operations. Since then, Burch [3], Windley and Burch [12], and Skakkebask, Jones 
+and Dill [11] have extended the approach to superscalar pipelined microprocessors. 
+Using a non-deterministic intermediate machine, Damm and Pnueli [5] constructed 
+
+
+19 
+
+
+
+
+a refinement relation between a sequential and Tomasulo-style implementation of an 
+out-of-order processor core. McMillan [8] verifies the same processor using composi¬ 
+tional model-checking techniques. The machine transitions are defined by next-state 
+operations on the full states of the ISA and the Tomasulo machines. This results in 
+a large conjunctive formula, each conjunct of which is checked independently. 
+
+Arguably, techniques like these that expose all of the micrbarchitecture’s state do 
+not fit well with hierarchical design methodologies. In developing the proof in this 
+paper, we attempted to hide as much as possible of the local state of each component. 
+The external behavior of each component is constrained by the component’s axioms, 
+but within those constraints the component’s state is unspecified. This encapsulation 
+may provide an additional level of abstraction and modularity to the verification 
+effort, and allow separate teams to develop each component, while ensuring that 
+global processor invariants are maintained. 
+
+Shen and Arvind [10] describe a term-rewriting methodology for verifying super¬ 
+scalar, speculative, out-of-order multiprocessors. Their approach can be considered 
+to be at an even higher level of abstraction than our Hawk designs which provided the 
+basis for our axiomatization. As a result, their specifications are simpler than ours. 
+However, most state transitions are defined across the machine as a whole rather 
+than localized to each component and subject only to the inputs of that component. 
+Furthermore, their model does not contain any explicit clocking mechanism, so it 
+is not clear how to derive cycle-accurate microarchitectural specifications. As their 
+models rely on being able to apply rewrite rules in any order, it is not clear how their 
+correctness result would translate to a lower-level implementation that did not have 
+this flexibility. 
+
+In a very recent paper, Sawada and Hunt [9] describe a microprocessor verification 
+that has many similarities to our work. They also construct a sequence of transaction¬ 
+like records, called a Micro-Architecture Execution Trace Table (MAETT). Like our a 
+state, the MAETT is permanently enlarged with every completed instruction. Each 
+entry in the MAETT stores a unique instruction identifier, all operands and results 
+of the instruction as ISA states, and the pipeline state in which the instruction is 
+currently located, plus other fields. These entries correspond strongly to the trans¬ 
+actions we use. The requirements the MAETT must satisfy are given abstractly in 
+terms of the ISA state and the microarchitecture state, in a similar way to our com¬ 
+ponent axioms. However, the structure of their proof also requires them to construct 
+an invariant between successive microarchitectural states. This invariant is likely to 
+reference most of the state elements of the micro-architecture. It is the most difficult 
+construction in their proof. 
+
+6 Conclusions 
+
+Rather than rely on “flushing” dynamic state to show equality with the ISA state, we 
+define correctness in terms of visible outputs. This means that we can avoid having to 
+demonstrate equivalence between internal states of the ISA and the dynamic machine, 
+so long as the outcome of the computations are the same. This may be important in 
+practice because the models constructed from a realistic machine are commonly too 
+big even to construct, let alone verify. By imposing a hierarchical view on the design, 
+we hope to mitigate this problem to some extent. 
+
+
+20 
+
+
+Our axiomatization can be satisfied by a family of microarchitectures. This means 
+that it retains a good deal of flexibility as the structure of individual components is 
+developed. Each component is specified independent of other components, in the same 
+way RTL design is organized. Once the overall microarchitecture has been developed, 
+the implementation and proof can be carried out independently. Although flaws found 
+during the proof might affect the microarchitectural design, this is true for other 
+analyses such cis time and performance estimating. Furthermore, the specification and 
+its correctness proof are independent of many configurations that effect performance. 
+For example, the specification does not explicitly set the latency of the RS and its 
+execution units, the number of execution units, the width of the computed wire, or the 
+accuracy of branch prediction. Therefore, many design decisions based on simulation 
+may be made without adversely affecting the global correctness proof. 
+
+We intend to repeat this work for a number of related microarchitectural forms, 
+and so to build a framework, based on the concept of signals of transactions, for 
+axiomatizing the major components of dynamic execution machines, and proving 
+global correctness properties. We would identify the most useful axioms for common 
+components and prove consequent lemmas about those components or about typical 
+interactions between them. 
+
+We also need to confirm that the axiomatizations can be related to specific mi- 
+croarchitecures. As mentioned earlier, we developed an executable P6-like speci¬ 
+fication in Hawk using the same structure described here. We plan to prove the 
+correctness of this executable model by proving that the component axioms hold for 
+the specifications of the RS, ROB, and IFU. We foresee a couple of complications in 
+achieving this. First, the Hawk model supports full memory instructions, and these 
+are present in the current work only in a very rudimentary fashion. Secondly, the 
+Hawk model contains extra inter-unit communication for dealing with finite bounds. 
+These facilities need to be included in the axiomatic model before the two can be 
+formally related. 
+
+7 Acknowledgments 
+
+For their contributions to this research, we thank Mark Aagaard, Borislav Agapiev, 
+Robert Jones, and John O’Leary of Intel Strategic CAD Labs; Tito Autrey and Dick 
+Kieburtz of OGI; and Arvind of MIT. 
+
+The authors are supported by Intel Strategic CAD Labs and Air Force Material 
+Command (F19628-93-C-0069). John Matthews recieves support from a graduate 
+research fellowship with the National Science Foundation. 
+
+
+References 
+
+[1] Aagaard, M., and Leeser, M. Reasoning about pipelines with structural 
+hazards. In Second International Conference on Theorem Provers in Circuit 
+Design (Bad Herrenalb, Germany, Sept. 1994). 
+
+
+21 
+
+
+[2] Birch, J., and Dill, D. Automatic verification of pipelined microprocessor 
+control. In 6th International Conference of Computer Aided Verification (Stan¬ 
+ford, California, June 1994). 
+
+[3] Burch, J. Techniques for verifying superscalar microprocessors. In 33rd annual 
+Design Automation Conference (Las Vegas, Nevada, June 1996). 
+
+[4] Cook, B., Launchbury, J., and Matthews, J. Specifying superscalar 
+microprocessors with Hawk. In Workshop on Formal Techniques for Hardware 
+(Maarstrand, Sweden, June 1998). 
+
+[5] Damm, W., and Pnueli, A. Verifying out-of-order executions. In Conference 
+on Correct Hardware Design and Verification Methods (Montreal, Canada, 1997). 
+
+[6] Gwennap, L. Intel’s P6 uses decoupled superscalar design. Microprocessor 
+Report 9, 2 (1995). 
+
+[7] Matthews, J., Launchbury, J., and Cook, B. Specifying microprocessors 
+in Hawk. In IEEE International Conference on Computer Languages (Aug. 
+1998). 
+
+[8] McMillan, K. Verification of an implementation of tomasulo’s algorithm by 
+compositional model checking. In International Conference on Computer-Aided 
+Verification (Vancouver, Canada, July 1998). 
+
+[9] Sawada, j., and Hunt, W. Processor verification with precise exceptions and 
+speculative execution. In International Conference on Computer-Aided Verifica¬ 
+tion (Vancouver, Canada, July 1998). 
+
+[10] Shen, X., AND Arvind. Design and verification of speculative processors. 
+In Workshop on Formal Techniques for Hardware (Maarstrand, Sweden, June 
+1998). 
+
+[11] Skakkebaek, J., Jones, R., and Dill, D. Formal verification of out-of-order 
+execution using incremental flushing. In International Conference on Computer- 
+Aided Verification (Vancouver, Canada, July 1998). 
+
+[12] Windley, P., and Burch, J. Mechanically checking a lemma used in an 
+automatic verification tool. In Formal Methods in Computer-Aided Design (Palo 
+Alto, California, 1996). 
+
+
+22 
+
+
+

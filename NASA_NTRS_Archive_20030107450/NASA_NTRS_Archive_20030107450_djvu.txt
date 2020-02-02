@@ -1,0 +1,1444 @@
+Automated Environment Generation for Software Model Checking 
+
+
+Oksana Tkachuk, Matthew B. Dwyer 
+Department of CIS 
+Kansas State University, USA 
+oksana @ cis .ksu . edu 
+
+
+Corina S. Pasareanu 
+Kestrel Technologies 
+Moffett Field, USA 
+pcorina @ email .nasa. arc .gov 
+
+
+Abstract 
+
+A key problem in model checking open systems is en- 
+vironment modeling (Le., representing the behavior of the 
+execution context of the system under analysis ). Software 
+systems are fundamentally open since their behavior is de- 
+pendent on patterns of invocation of system components and 
+values defined outside the system but referenced within the 
+system . Whether reasoning about the behavior of whole 
+programs or about program components , an abstract model 
+of the environment can be essential in enabling sufficiently 
+precise yet tractable verification. 
+
+In this paper, we describe an approach to generating en- 
+vironments of Java program fragments. This approach in- 
+tegrates formally specified assumptions about environment 
+behavior with sound abstractions of environment implemen- 
+tations to form a model of the environment. The approach is 
+implemented in the Bandera Environment Generator (BEG) 
+which we describe along with our experience using BEG 
+to reason about properties of several non-trivial concurrent 
+Java programs. 
+
+1 Introduction 
+
+Model checking the source code of realistic software sys- 
+tems is a challenge and is currently the topic of a large num- 
+ber of research efforts (e.g., [7, 16, 30]). The primary chal- 
+lenge lies in overcoming the enormous cost of model check- 
+ing which grows as the product of the number of indepen- 
+dent program components, such as, threads of control.-Most 
+researchers agree that abstraction is the key to overcom- 
+ing this challenge. Research on abstracting the data state 
+of programs using techniques such as predicate abstraction 
+(e.g., [3]) are steadily increasing the size and complexity of 
+programs that can be efficiently analyzed. A complemen- 
+tary approach involves decomposing the program, check- 
+ing properties of the components, and then composing the 
+analysis results to draw conclusions about the overall be- 
+havior of the program. A variety of forms of compositional 
+or modular verification have been studied (e.g., [18]) but 
+
+
+they have not been adapted for software written in modem 
+programming languages. 
+
+In this paper, we describe automated tool support for 
+adapting existing software model checking frameworks to 
+provide a restricted form of modular verification. Specif- 
+ically, we consider decomposition of a Java program into 
+two parts: a unit under analysis (henceforth called a unit) 
+and its environment. A unit is any collection of Java classes 
+and its environment consists of the classes with which the 
+unit interacts through the unit’s interface 1 . The unit’s source 
+code will be the subject of verification along with an ab- 
+stract model of the environments externally observable be- 
+havior. This environment model is derived from specifica- 
+tions written by the user or from the results of analyzing 
+source code that implements environment components. Ex- 
+isting abstraction techniques [9] may be applied to local unit 
+data and to the data that flows between the unit and environ- 
+ment. The resulting abstracted unit and environment may 
+then be analyzed by existing Java model checking frame- 
+works such as JavaPathFinder [30] and Bandera [7]. 
+
+Thorough treatment of the mechanisms by which the 
+environment may influence the behavior of the unit is es- 
+sential for sound reasoning. The environment may in- 
+fluence the unit’s control (e.g., by invoking methods in 
+the unit’s interface or influencing synchronization relation- 
+ships) and data (e.g., by passing environment data to the 
+unit or by modifying unit data that may flow to the en- 
+vironment). By unit data we mean objects of unit type 
+(i.e., the object’s type is included in the unit). Java classes 
+are broken into two categories depending on whether 
+they hold a thread of control. In Java, a class contain- 
+ing the main method or classes that extend(implement) 
+j a va . 1 ang . Thr e a d ( j a va . 1 ang . Runnab 1 e ) are 
+labeled active , the rest are termed passive. For consistency, 
+we reuse terminology from previous work [10], and call the 
+active environment classes drivers and passive environment 
+classes stubs. Our approach provides mechanisms by which 
+a wide-range of driver and stub behaviors may be safely ap- 
+
+l We treat interfaces in Java as classes which comprise a unit interface 
+in our terminology. 
+
+
+proximated. 
+
+Experience has shown that the developing environment 
+models for software model checking that are sufficiently 
+precise to enable effective reasoning yet not so over- 
+restrictive that they mask faulty system behaviors is a sig- 
+nificant challenge [19, 20]. Developing such an environ- 
+ment may require an understanding of unstated assumptions 
+about system usage and software interfaces, careful coding 
+to ensure that those assumptions are satisfied in the least 
+restrictive way, and evaluation through model checking of 
+the environment and the unit under analysis. For this rea- 
+son, we believe that multiple sources of information should 
+he combined to generate environment models that reflect a 
+broad range of realistic execution contexts for a unit under 
+analysis. BEG is aimed at both minimizing the effort re- 
+quired to generate environment models and increasing their 
+fidelity with respect to assumptions about environment be- 
+havior. Specifically, BEG currently automates: the discov- 
+ery of the unit-environment interface based on minimal user 
+supplied information, the synthesis of environment drivers 
+from specifications of the sequences of program actions 
+they may perform, and the synthesis of environment stubs 
+from analysis of the possible program actions executed by 
+existing environment code. Program actions in our setting 
+are statements that may directly influence the data or control 
+state of the unit. 
+
+We envision two ways in which environment generation 
+tools can be used effectively: during component develop- 
+ment as an adjunct to traditional unit testing approaches and 
+during program validation to enable more efficient reason- 
+ing and to model non-source-code components. 
+
+During component development individual classes, or 
+groups of classes, that constitute cohesive functional com- 
+ponents, perhaps structured as Java packages, may become 
+code complete when the code they interact with (e g., client 
+code) has not been written. In this setting, the class(es) form 
+a unit and the missing classes they interact with form the 
+environment. To enable effective checking, we expect that 
+developers will need to encode assumptions about the be- 
+havior of the environment at the unit's interface. They will 
+need to account for both control and data effects. These as- 
+sumptions can subsequently be checked against implemen- 
+tations of the missing environment classes as they become 
+code complete. 
+
+During program validation when considering a complete 
+application one may break the system into parts to enable 
+more efficient checking of program properties. In this set- 
+ting, the user selects classes that comprise the unit under 
+analysis and an environment model is automatically ex- 
+tracted. For applications that interact with external entities, 
+such as embedded control software processing data from 
+hardware devices, developers may incorporate assumptions 
+about those interactions to generate a representative model 
+
+
+
+H— 
+
+
+
+
+
+
+Java 
+
+Model 
+
+Checking 
+
+Tools 
+
+
+Figure 1. BEG Architecture 
+
+
+of the external environment. 
+
+Our approach builds on existing work in assume- 
+guarantee reasoning and in program flow analysis. The ap- 
+proach is implemented in the Bandera Environment Gen- 
+erator (BEG) which supports modular checking of Java 
+source code. Our previous work [28] presented the de- 
+tails of the program analysis and synthesis techniques used 
+to model the data effects of environment implementations. 
+This paper focuses on control effects for active environ- 
+ment components and makes several contributions, includ- 
+ing (i) defining a language of program actions with which to 
+specify environment behaviors; (ii) adapting existing spec- 
+ification forms for defining patterns of environment behav- 
+ior; (m) synthesing source code models of environment be- 
+havior that 1 ' can be processed by existing' model checking 
+frameworks; and ( iv ) a preliminary evaluation of the effec- 
+tiveness of BEG in supporting modular source-code model 
+checking. While BEG supports the checking of Java source 
+code, the fundamental concepts it embodies are much more 
+broadly applicable. 
+
+The next Section describes our basic approach and an 
+example that is used throughout the paper. Section 3 de- 
+scribes the formalisms for specifying environment behav- 
+ior and generating environment models as Java source code. 
+Section 4 discusses the soundness of environments relative 
+to specified assumptions. An overview of several case stud- 
+ies using BEG is presented in Section 5. We then compare 
+and contrast our work to existing research in Section 6 and 
+conclude in Section 7. 
+
+2 Basic Approach and An Example 
+
+The fundamental assumption in BEG is that precise rea- 
+soning about the unit is desired, but that some precision in 
+modeling the environment may be sacrificed. Our approach 
+is to safely approximate environment data and the environ- 
+
+
+2 
+
+
+
+
+
+ment statements that may influence the unit’s behavior. 
+
+Modelling the effect of environment statements is 
+achieved by a combination of user specifications and analy- 
+sis of Java source code. Figure 1 shows the architecture of 
+BEG. BEG accepts multiple information sources for gener- 
+ating an environment model. Users identify the unit under 
+analysis by naming the classes, interfaces and packages that 
+comprise the unit. Users provide specifications of their as- 
+sumptions about the patterns of unit method calls and unit 
+field definitions that the environment may make. If an im- 
+plementation of the environment is available, BEG may be 
+used to automatically extract the environment assumptions 
+using static analysis techniques. Thus, environment mod- 
+els can be synthesized from a combination of assumption 
+specifications and the results of analyzing implementations. 
+Those models are encoded as Java source code using a col- 
+lection of modelling primitives to express the atomic execu- 
+tion of environment actions, to encode non-determinism in 
+the environment, and to reflect the approximation in analy- 
+sis results. 
+
+We illustrate our approach on a small publish- 
+subscribe program implemented using Java’s Observer 
+and Observable library components. Figure 2 shows 
+class Sub j ect, which is an observable; a field obs of type 
+Buffer, shown on the left side of Figure 4, is a container 
+for Watchers that are registered for the Subject. The 
+Watcher class contains two bookkeeping fields that record 
+the total number of registration attempts and the num- 
+ber of aborts. Suppose, we are interested in reasoning 
+about whether “Only registered Watchers are notified of 
+Subject updates”. This can be specified in several ways, 
+but one approach is to test whether registered field of 
+Watchers is true at the point where a Subject calls 
+update ( ) . 
+
+2.1 Interface Discovery 
+
+The user designates the unit under analysis by naming a 
+collection of Java classes whose properties need to be veri- 
+fied. In general, selection of the classes in the unit is driven 
+by the properties that one wants to reason about. 
+
+These classes are analyzed to determine: the fields of 
+unit supertype classes that are referenced in the unit and 
+the non-unit classes that are directly referenced by the unit. 
+Any referenced supertypes are included in the unit. Directly 
+referenced non-unit classes define the unit interface. 
+
+For our example and the mentioned property, 
+Subject and Watcher should be in the unit. 
+Their supertypes j ava . ut il . Observable and 
+
+java. util .Observer and referenced Buffer are 
+in the environment. Note, that the actual environment 
+may consist of more classes due to transitive class and 
+method dependencies, however, BEG identifies classes 
+
+
+public boolean unregistei* (Watcher w) { 
+if (super . removeE lenient (w) ) { 
+
+w. registered « false ' return true; 
+
+} 
+
+return false; 
+
+1 
+
+public Watcher removeFirst ( ) { 
+
+Watcher result = e 1 ement At Index (0 ) ; 
+removeElement (result) ; 
+return result; 
+
+} 
+
+Buffer Implementation 
+
+public boolean unregister (Watcher p0){ 
+if (chooseBool O ) p0 . registered = false ; 
+return chooseBool () ; 
+
+} 
+
+public Watcher removeFirst () { 
+
+return ( (Watcher) chooseClass ( "Watcher" ) ) ; 
+
+} 
+
+Generated Environment 
+
+Figure 4. Bounded Buffer Stubs (excerpts) 
+
+that are immediately referenced in the unit. The part 
+of the environment that is invisible to the unit is safely 
+approximated. 
+
+2.2 Driver Specification and Synthesis 
+
+One may specify assumptions about sequences of 
+method calls and unit field definitions that the environment 
+may make on the unit. BEG generates a set of driver 
+threads that implement the most liberal model that is con- 
+sistent with the given assumptions. Figure 3 illustrates 
+an assumption with one instance of Subject and two 
+Watchers and a pair of threads whose behavior is given 
+by regular expressions over method names with parameter 
+values elided; elided parameters means that their value is 
+selected non-deterministically from the possible values of 
+the parameter type. The first thread repeatedly calls the 
+changes tate ( ) method on a selected Sub j ect and the 
+second calls any sequence of add () or delete ( ) calls 
+on a selected Sub j ect with some Watcher. 
+
+Figure 3 also shows the generated drivers that cap- 
+ture the assumed behavior. Main allocates the spec- 
+ified instances and starts the execution of the two 
+threads. Thread implementations model the assump- 
+tion specifications by invoking modeling primitives that 
+capture non-determinism (e.g., chooseBool () chooses 
+among {true, false}, chooselnt (n) chooses among 
+{0, and chooseClass (C) chooses among the 
+
+allocated instances of class C) [8]. 
+
+2.3 Stub Analysis and Synthesis 
+
+A series of static analyses, including points-to and side- 
+effects analyses, are applied to determine how the environ- 
+
+
+3 
+
+
+public class Watcher implements Observer{ 
+static public int attempts = 0; 
+static public int aborts 0; 
+public boolean registered * false; 
+public void update (Observable O, Object arg) { } 
+
+public class Subject extends Observable { 
+boolean changed = false; 
+
+Buffer obs; 
+
+public Subject 0 { obs = new BufferO; } 
+
+public void changeState ( ) { setChanged ( ) ; not if yObservers { ) 
+
+public synch... void add (Watcher o) { obs . register (o) ; } 
+public synch... void delete (Watcher o) { obs . unregister (o) 
+
+
+public void notify (Object arg) { 
+
+Watcher cw; 
+
+Buffer lb * new BufferO; 
+synchronized (this) { 
+if ('changed) return; 
+obs . copy (lb) ; changed =: false; 
+
+} 
+
+if (obs.sizeO != lb.siteO) cw = null; 
+while { lib. isEmpty () ) { 
+
+cw = lb. remove First () ; cw. update (this , arg);} 
+
+protected synch... void setChangedO { changed = true;} 
+
+
+Figure 2. Customized Observer Implementation 
+
+
+environment { 
+
+instantiations { 1 Subject; 2 Watcher; } 
+regular assumptions { 
+
+(changeState 0 )* ; 
+
+(add() | delete ( ) ) * ; 
+
+} 
+
+} 
+
+public class EnvDriver { 
+
+public static void main (java . lang . String [•] paramO) { 
+Subject sO = new Subject (); 
+
+Watcher wO = new Watcher (); 
+
+Watcher wi = new Watcher () ; 
+new TO (sO , wO, wl). start (); 
+new Tl(s0, wO, wl ). start (); 
+
+) 
+
+} 
+
+
+public class TO extends java . lang .Thread { 
+public Subject sO; 
+public Watcher wO , wl ; 
+
+public TO (Subject pO, Watcher pi. Watcher p2 ) { 
+sO « pO; wO = pi; wl = p2 ; } 
+public void run ( ) { 
+
+while (Bandera . chooseBool () ) sO . changeState ( ) ; } 
+
+) 
+
+public class T1 extends java . lang .Thread { ... 
+
+public void runf) { 
+while (Bandera . chooseBool () ) 
+switch (Bandera . chooselnt (2) ) { 
+
+case 0: sO .delete (Bandera. chooseClass ("Watcher" )) ; 
+
+break; 
+
+case 1: sO .add (Bandera .chooseClass ("Watcher”) ) ; 
+break; } } 
+
+
+Figure 3. Assumptions and Generated Drivers 
+
+
+} 
+
+
+ment methods can influence the unit data [28]. In our exam- 
+ple, the analysis of the Buffer implementation calculates 
+effects of the environment on the fields of Watcher, for 
+instance method unregister may side-effect only one 
+field registered. 
+
+Models are generated to reflect all possible side-effects 
+as calculated by the preceding analyses. To safely reflect 
+the possibility of a side-effect, code is generated to execute 
+abstract assignments n on-deterministic ally. Figure 4 shows 
+the generated environment for several methods of Buffer. 
+For example, the access of a Watcher instance, via call 
+elementAtlndex(O), in method unregister () is 
+approximated as the return of a non-deterministically cho- 
+sen instance of Watcher. 
+
+2.3.1 Tool Support 
+
+This example illustrated the basic capabilities of BEG. 
+BEG supports the specification a wide-range of assump- 
+tions about environment behavior compactly using regular 
+expressions, temporal logic formula (defined over program 
+actions), and data side-effects summaries. In the absence of 
+specified assumptions, BEG can be configured to make rea- 
+sonable assumptions about the intended environment. For 
+example, it is assumed that the calling environment consists 
+of a number of unit class instances and threads (specified 
+on the command line) that exhibit universal behavior (i.e., 
+
+
+they perform any sequence of calls over the methods in the 
+system by selecting appropriately typed class instances). 
+
+In its current form, the tools make assumptions about the 
+lack of divergence indefinite-blocking, and lock acquisition 
+in the environment. Ongoing work is extending the tools 
+to support the specification of behavior related to these lan- 
+guage aspects and the extraction of safe approximations of 
+such behavior from implementations. Despite these limi- 
+tations, the BEG toolset has been effective in supporting 
+modular reasoning about properties of a number of realistic 
+systems as discussed in Section 5. 
+
+3 Driver Specification and Synthesis 
+
+We focus in this section on the specification of the 
+expected behavior of environment drivers. The building 
+blocks of those specifications are descriptions of program 
+actions that may influence the control or data state of the 
+unit under analysis. Those program actions are then com- 
+bined to describe the patterns of environment behavior. 
+
+3.1 Environment Instantiation 
+
+We define a name scope within which environment spec- 
+ifications may refer to specific class instances; by default 
+the name scope is empty. 
+
+
+4 
+
+
+
+The global name scope is defined by annotating instanti- 
+ations. In an instantiation, the number of instances allocated 
+of a type by the environment is given and those instances 
+may be named. For example, we can adapt the assump- 
+tion specification in Figure 3 to explicitly name the lone 
+Subj ect instance, s, and reference it regular expression. 
+
+environment { 
+
+instantiations { 1 Subject s; ... } 
+
+regular assumptions { (s.add() [ s . delete ())* ; ... } 
+
+It is important to distinguish between named instances 
+and the set of all instances. The latter is the set of all envi- 
+ronment and unit allocated instances. That set forms the 
+universe from which non-deterministic choice primitives 
+over reference types are evaluated. 
+
+A local name scope can also be defined that applies to a 
+portion of an assumption specification. The preceding ex- 
+ample can be rewritten using a local name scope as: 
+
+environment { 
+
+instantiations { 1 Subject; ... } 
+
+regular assumptions { 
+
+cSubject s>:(s.add() j s .delete ())* ; ... } 
+
+} 
+
+By default local names are bound to a non-deterministically 
+selected value of the given type that holds throughout the 
+name scope (which is denoted explicitly by a pair of { } 
+and which extends to the end of the expression by default). 
+Thus, they serve a function similar to universal quantifiers 
+in logics and their primary use is in correlating event oc- 
+currences (e.g., that a sequence of actions are applied to the 
+same receiver object). 
+
+In these examples, there is a single instance of 
+Subject, thus the three specifications are semantically 
+equivalent. In general, this will not be the case. Lo- 
+cal name introduction is interpreted as non-deteiministic 
+choice over the the set of allocated instances of the named 
+type, Subj ect in this case. Local name scopes may be 
+nested and may refer to additional names. For example, 
+<Subject x> : <Subject-x y> : . . . introduces two 
+names that are guaranteed to refer to distinct instances of 
+Subj ect. Local names may also be bound to values from 
+the unit. For example, <Ref x=getRef ( ) > : x . m ( ) in- 
+troduces a name x that is bound to the value returned by 
+a call and that is subsequently used to perform a call on 
+method m ( ) . 
+
+3.2 An Alphabet of Program Actions 
+
+Let U be the set of classes that comprise the unit under 
+analysis and let B denote the set of Java builtin types. We 
+define an alphabet of actions consisting two classes of ac- 
+tions: field assignments and method calls. 
+
+Assignments can be either static field assignments or as- 
+signments through object references of unit type. Assign- 
+ments are of the form r./= rhs where: type(r) € U 9 f is of 
+
+
+unit type, and rhs is either a scalar constant or T typetfy ^ 
+typeif) £ B y or chooseClass (type(f ) ) , if type(f) £ U. 
+Here T typeif) denotes an y possible value of typeif ) ; for 
+scalar types the expansion of values is done implicitly via 
+abstraction [9]. The target of the assignment, r, is either an 
+introduced name, T for an appropriate type, or the name of 
+a class. 
+
+Method call actions are defined using standard Java syn- 
+tax, but where partial specification of parameters is allowed. 
+Consider a method in class C with signature public R 
+m (Pi pi, P 2 p 2 ) . We can denote the occurrence of a 
+call to this method with any receiver object of type C, a 
+specific value, Vi, forpi, and any value forp 2 as m( tq, T), 
+where v\ is an introduced name or a scalar. Partially speci- 
+fied calls may omit the receiver object or any parameter by 
+replacing it with T. The meaning of such a call is the set 
+of all calls that can be constructed by replacing T with any 
+legal value of the receiver or parameter type. 
+
+We note that BEG, through the process of interface dis- 
+covery, produces the set of program actions (i.e., public 
+method calls and fields at the unit-environment interface) 
+that can be used to define assumptions. 
+
+3.3 Specifying Patterns of Actions 
+
+Regular expressions defined over this alphabet describe a 
+language of actions that can be initiated by the environment. 
+The simplest regular expression is a single program action. 
+Complex environment assumptions are built up using the 
+standard operators for regular expressions: r; s (concatena- 
+tion), fjs (disjunction)* r* (closure), and r? (one of more 
+occurrences of r ). Positive closure (r+), bounded iteration 
+(r * n = 7 * 1 ; r 2 ; . . . ; r n ), and a generalization of bounded 
+iteration (r * {n, m} = r * n\r * [n + 1) | . . . [r * m) are 
+also supported. These expressions can appear in introduced 
+name scopes, where those names are referenced in the pro- 
+gram actions used in the expression. The syntax of these 
+assumptions is given in Figure ??. where a is a program 
+action, a/ un ar e function call actions, n and m are intro- 
+duced name, and t is a program type name. Legal assump- 
+tion specifications must also satisfy some type constraints. 
+Specifically, type expressions, te, may only involve types 
+and named variables, m, of that type; m here must refer to 
+a name introduced in an enclosing name scope. Similarly, 
+name initializations, ni, may only involve function call ac- 
+tions whose type is compatible with the type of the type 
+expression for the introduced name. 
+
+As an example, java. util . Iterator presents a 
+simple standard interface for generating the elements in 
+an instance of a container. Semantically, this interface as- 
+sumes that for each instance of a class implementing the 
+Iterator interface (denoted by the introduced name i), 
+all clients will call methods in an order that is consistent 
+
+
+5 
+
+
+* [&x , Q>2 > ■ • • > Q»n] 
+
+==• [— ai,a2, • • • ,a n ] 
+== si;s 2 
+== 5i|s 2 
+
+~ w 
+
+== 5 + 
+
+== S“M,J 
+== < t ni>: s 
+
+;== < te n >: s 
+
+
+Til 
+
+:== 
+
+n 
+
+
+:== 
+
+71 = <Zf un 
+
+te 
+
+:== 
+
+t 
+
+
+:== 
+
+te — m 
+
+
+Figure 5. Assumption Syntax 
+
+
+with the following specification: 
+
+environment { 
+
+instantiations { k Iterator; } 
+
+regular assumptions { 
+
+[Iterator i] : i . iterator () ; 
+
+( i . hasNext ( ) ; i . next ( ) ; i . remove ( ) ? ) * 
+
+} 
+
+} 
+
+This expresses both required sequencing of calls (e.g,, a 
+call to iterator () must precede a call to .hasNext) 
+and allowable optional calls (e.g., the occurrence of a single 
+remove ( ) call after a call to next ( ) ) over each instance 
+of Iterator. 
+
+3.4 From Regular Expressions to Code 
+
+Java models of regular expresson assumption specifica- 
+tions can be generated using the templates shown in Fig- 
+ure 6. These templates use the non-deterministic choice 
+constructs mentioned previously and are defined recur- 
+sively, using code to refer to the code fragment for a given 
+subexpression. 
+
+One can view name scope introduction for a subexpres- 
+sion as prefixing a special name binding action to the subex- 
+pression. Name scopes are supported by introducing local 
+variables in the body of the driver run ( ) method and as- 
+signments that non-deterministically choose an instance to 
+be bound to the name at the point where the name binding 
+action is embedded in the regular expression. 
+
+We note that much of the generated model code is in- 
+ternal to the environment Internal environment states and 
+actions are hidden in our models by embedding them in 
+atomic statements. This has two consequences: internal en- 
+vironment behavior does not contribute to state explosion 
+and internal actions are elided from counter-examples mak- 
+ing them shorter and easier to read. 
+
+
+r;s 
+
+r* 
+
+T+ 
+
+r? 
+
+r * n 
+
+
+r * {n, m} 
+
+
+< t n >: r 
+<t n — f >: r 
+
+— ... — m/e n >: r 
+
+
+switch (chooselnt (1) } { 
+case 0: code(r) ; break; 
+case 1: code is) ; break; 
+
+} 
+
+codei r) ; code(s ) ; 
+while {chooseBool () ) {codei r) ; } 
+do { codei r) ; } while (chooseBool ( ) 
+if (chooseBool () ) [code(r) ;) 
+for (int i=0;i<n; i++) { 
+codei r) ; } 
+
+} 
+
+for (int i=0 ; 
+
+i<nl+chooseInt (m-n) ; i++) { 
+code ( r ) ; 
+
+} 
+
+{ t n = chooseClass (t) ; 
+
+code (r) ; } 
+
+{ t n = f ( ) ; 
+
+code (r) ; } 
+
+{ t n; ■ 
+
+while (true) { 
+
+n * chooseClass (t) ; 
+if (n mi) continue; 
+
+if (n » mfc) continue; 
+break ; 
+
+} 
+
+code (r) ; } 
+
+
+Figure 6. Assumption Semantics 
+
+
+Regular expressions are a familiar formal notation to 
+many developers and our experience is that many find it 
+easier to use than temporal logics. We also support assump- 
+tions specified as Linear Temporal Logic (LTL) and gener- 
+ate Java models using an approach that is similar to the one 
+developed for Ada modeling in [22]. 
+
+4 Soundness of Synthesized Environments 
+
+In this section, we justify the soundness of synthesized 
+environments with respect to assumption specifications and 
+the results of side-effects analyses. 
+
+4.1 Preliminaries 
+
+Formally, we model the behavior of a concurrent pro- 
+gram written in Java as a labelled transition system . Cor- 
+bett shows how to model the behavior of Java [6] programs 
+as transition systems as defined below, using standard tech- 
+niques for constructing control flow graphs. 
+
+A labelled transition system P is a triple 
+(5(F), Act, R), where F is a set of typed program 
+variables , 5(F) is the set of states representing valuations 
+of the variables from F, Act is an alphabet of actions and 
+R C 5(F) x Act x 5(F) is a transition relation. We write 
+
+
+6 
+
+
+
+5 s' for (s, a , s') 6 P. For a set of variables W C F, 
+s|w denotes the valuation of variables from W in state s. 
+
+States of a system can be regarded as tuples giving the 
+values of all relevant program variables, including the pro- 
+gram counter. A transition s s' says that the system can 
+evolve from state s to state s' by executing action a. The la- 
+bels on transitions can represent variable assignments, vari- 
+able tests, and actions modelling transfer of control to and 
+from a procedure; parameter passing can be simulated by 
+communication through common (shared) variables. 
+
+We assume that a system is open , i.e. it can interact with 
+its environment through shared variables and actions. If V 
+is the set of variables for an open system, let F™* denote 
+the set of internal (local) variables (that only the system 
+itself may modify) and let V corn denote the set of com- 
+mon (shared) variables , such that V = V Z7lt U V corn and 
+F™* n V com = 0. Also if Act is the set of actions of 
+the open system, let Act™* denote the set of internal ac- 
+tions (a symbol representing an internal action of a system 
+is in the alphabet of only that system) and let Act COTn de- 
+note the set of communication (or interface) actions , such 
+that Act = Act™* U Act com and Act™* Pi Act C0m = 0. 
+A system is closed if it may not interact with the environ- 
+ment; a closed system has no shared variables or actions 
+(i.e. V™* = 0 and Act™* = 0). 
+
+In order to define the interaction of an open system 
+with the environment, we first define a parallel composi- 
+tion of two systems. Let Pi == (5(Fi), Acti, Rf) and 
+P 2 = (5(F 2 ), Act 2 , P 2 ) be two open systems. We say 
+that Pi and P 2 are compatible if both their sets of inter- 
+nal variables and sets of internal actions are disjoint (i.e. 
+F™* n yint = 0 and Act »«t n Act jnt = 0) 
+
+Let Pi and P 2 be two compatible systems as above. 
+The composition of P x and P 2 , denoted Pl||P 2 , is an- 
+other system P = (5(F), Act, P), where V — Vi U V 2 , 
+Act = Act 1 U Act 2 , (s, a, s') £ Riff (a# Act i A sjytnt — 
+s'lyiTvt) V (a € Acti a (s|y.,a, s'\ Vi ) € P*), i ~ 1,2. 
+
+The two systems synchronize on the shared actions and 
+asynchronously interleave all other actions. The internal 
+variables of system P* may be modified only by the actions 
+of system P*, while the common variables may be modified 
+by both systems. 
+
+An environment for system P is another system E that is 
+compatible with P. Note that after completing the system 
+with a definition of a system representing the environment, 
+the resulting system (i.e. P||P) is still open , admitting arbi- 
+trary interference from the environment; once we know that 
+all the processes/code modelling the environment have been 
+included, and no further interaction with the external world 
+is expected, we may “close” system E\\P by declaring all 
+the shared variables and actions to be internal to the system. 
+
+
+4.2 Data and Control Effects 
+
+Our program model is general enough to capture differ- 
+ent interactions between the system and the environment: 
+through shared data and control (i.e., communication ac- 
+tions ); the model does not directly capture dynamic alloca- 
+tion of data, so we put a limit to the number of objects that 
+can flow into the system from the environment. 
+
+Our generated environments are either drivers or stubs. 
+Drivers capture the control influences from the environ- 
+ment, while the stubs capture the data influences from the 
+environment. 
+
+4.2.1 Simulation and Preservation Results 
+
+We proceed to define when a system is a sound abstrac- 
+tion of another one. Abstracting means having less de- 
+tails while respecting behaviors of the original system. Let 
+P = (5(F), Act, P) and P' = (5(F'), Act',#') be two 
+systems. We say that P is a sound abstraction of P' iff 
+there is a simulation from P to P' . 
+
+A simulation [18] from P to P' is a pair (p 5 , p a ) of re- 
+lations with p s C 5(F) x 5(F') and p a C Act x Act' 
+such that if ( 5 , s') £ p s and s t, then there exists some 
+
+state t' £ S' and some action a' £ Act' such that s' f', 
+(£, t') £ p s and (a, a') £ p a . We say that P simulates P', 
+denoted P P', if there is a simulation from P to P'. 
+
+When specifying properties of software systems, we use 
+universal temporal logics , i.e., we reason about properties 
+that hold along every possible execution path. A standard 
+result, see e.g. [21], says that simulations preserve satis- 
+faction of formulas of such logics. I.e., if P ^ P', then, 
+for every universal temporal formula <f>, P' f= <j> implies 
+P j= 4>. However, if P' j= f does not hold, it does not 
+mean that P |= <j> is necessarily false (i.e., completeness is 
+sacrificed). 
+
+Our synthesized environments are sound abstractions of 
+real environments (see [21, 26]), and model checking a sys- 
+tem in a synthesized environment is sound. Extending of 
+the results from [21, 26], we have the following results: (i) 
+if E < E abs , then P||P ^ E abs \\P , and (ii) if E ^ E abs 
+and P ^ P abS) then E\\P < E abs \\P abs .,fn other words, it 
+is safe to check universal temporal properties in the pro- 
+grams that use the automatically generated environments 
+since these environments are sound abstractions of real en- 
+vironments. 
+
+5 Experience with BEG 
+
+BEG is implemented using the SOOT framework [29]. 
+BEG uses SOOT’s symbol table, control flow graph, and 
+bytecode representation, Jimple, to perform its analyses; 
+Jimple is a 3-address SSA-like intermediate form. The tools 
+
+
+7 
+
+
+produce Java code as output that includes calls to the mod- 
+eling methods introduced in Section sec: GENERATE. This 
+section describes our experience applying BEG to generate 
+environments for portions of programs that have appeared 
+recently in the literature on Java verification. The actual 
+verification was performed using either JavaPathFinder or 
+Bandera. 
+
+5.1 Case Studies in Environment Generation 
+
+We have applied BEG to a variety of examples 2 . A num- 
+ber of multi-threaded Java programs that have been the sub- 
+ject of analysis in literature have been re-verified by gen- 
+erating the previously hand-built environments with BEG; 
+the resulting checks are in fact slightly more efficient due 
+to the atomicity of environment behavior in generated en- 
+vironments. In addition to the Observer/Observable ex- 
+ample, these examples include: a Producers/Consumers 
+framework for exercising a bounded buffer [15]; RWVSN, 
+Lea’s [17] generic readers -writers synchronization frame- 
+work; and dining philosophers with host, a classic synchro- 
+nization problem. 
+
+While. BEG proved to be quite useful in generating envi- 
+ronments for these small systems, the tool support is much 
+more valuable when attempting to reason about proper- 
+ties of larger software systems. An increasingly important 
+class of object-oriented software systems are frameworks . 
+Frameworks provide for large-scale reuse of functionality 
+by collecting threads of control, operations and data struc- 
+tures that relate to a specific problem domain (e.g., Swing is 
+a Java framework that supports the development of graphic 
+user interfaces (GUI)). Frameworks present rich interfaces 
+that allow application specific processing to be co-ordinated 
+through the framework. Frameworks are quite difficult to 
+test due to the complexity of their interfaces and the de- 
+gree of parameterization that is possible to configure their 
+behavior. Current state-of-the-practice in framework test- 
+ing relies on the use of groups of use cases to drive test 
+case generation. BEG enables the synthesize of drivers that 
+capture multiple framework use cases and mode state ma- 
+chines. Furthermore, the use of non-determinism in as- 
+sumption specifications allows drivers to span configura- 
+tion settings. This has the great advantage of allowing 
+configuration-independent properties to be analyzed with- 
+out having to enumerate combinations of configuration set- 
+tings. 
+
+To explore BEG’s support for analyzing frameworks, 
+we consider two non-trivial Java programs. Autopilot is 
+a swing-based GUI for an MD-1 1 autopilot simulator used 
+for pilot training at NASA [24]; it is a framework client 
+application. ReplicatedWorkers [12], is a parameterizable 
+
+2 The details of all examples are given at http : //www . cis . ksu . 
+edu/bandera. 
+
+
+parallel job scheduling framework. Since neither of these 
+programs can be model checked efficiently in combination 
+with an environment implementation, rather than focus on 
+measures of time and space required for checking, we de- 
+scribe how the tools supported the user in performing mod- 
+ular checking. 
+
+5.2 Autopilot 
+
+The MD-11 autopilot tutor is a web-based application 
+that has a graphical user interface (GUI) that simulates the 
+Autopilot Mode Con troT Panel and a Primary Flight Dis- 
+play of an MD-11 aircraft autopilot. A user may click on 
+buttons to dial desired altitude and vertical speed, and ad- 
+vance the aircraft towards its goal altitude. Autopilot is im- 
+plemented as an applet. The application code consists of 
+more than 3600 lines of code clustered in two main classes. 
+These measures bely the true complexity of the system as 
+there is intensive use of j ava . awt and j ava . swing 
+GUI frameworks that influences the behavior of the system; 
+in fact the main thread of control is owned by the frame- 
+work and application methods are invoked as application 
+call-backs. 
+
+The system was checked for mode confusion by encod- 
+ing a model of a pilot’s understanding of the aircraft state. 
+That mental model was integrated with the system to mon- 
+itor GUI inputs. Assertions were inserted to compare the 
+state of system data structures with the state of that model; 
+assertion violations indicated a mismatch between the men- 
+tal model and the software’s state which implies a potential 
+mode confusion. 
+
+To analyze the system BEG was used to generate stubs 
+for all the GUI framework components and to generate 
+drivers that encode regular assumptions about pilot behav- 
+ior. We restrict our attention here to the generation of the 
+drivers, for a more complete description see [27]. 
+
+The main class of the system is Autopilot which ex- 
+tends j ava . applet . Applet which in turn extends sev- 
+eral AWT classes. This applet makes a large number of calls 
+to AWT methods in order to create and update the simulated 
+cockpit displays. The properties we wished to reason about, 
+however, were independent of the state of the GUI and we 
+were chose the Autopilot class itself as the unit. 
+
+BEG calculated the data effects of the AWT methods 
+called from the Autopilot class and generated safe ap- 
+proximation of the data effects on explicitly defined fields 
+of Autopilot and on fields inherited from AWT classes. 
+
+For this system, we found it useful to name the pilot 
+actions to improve the readability of both the assumption 
+specifications and generated counter-examples. As shown 
+in Figure 7, BEG allows one to define mnemonics for GUI 
+interface actions and to define regular assumptions in terms 
+of those mnemonics. Model checking the Autopilot 
+
+
+8 
+
+
+
+environment { 
+
+instantiations { 1 User (new Autopilot {}) ; } 
+definitions { 
+
+start=mouseClicked (1) ; pullAl tfCnob=mouseClicked (6} ; 
+incMCPAlt=mouseClicked (9) ,- iricMCPVS=mouseClicked ( U) ; 
+f ly=mouseClicked (14) ; pilotExp=getExpectation ( ) ; 
+
+) 
+
+regular assumptions { 
+start > incMCPAlt~{l, 10 } > 
+pullAltKnob > (pilotExp > fly)~{l,10} > 
+incMCPVS~{l,10) > (pilotExp > fly) *5 ; 
+
+) 
+
+} 
+
+Figure 7. Autopilot Assumptions 
+
+environment { 
+
+import ca . replicatedworkers 
+instantiations { 
+
+1 ConcreteWorkCol lection; 1 ConcreteWorkltem; 
+
+1 ConcreteResultsCollection; i ConcreteResu.lt I tern; 
+
+1 Replicatedworkers ( 
+
+new Configuration (NONE, SYNCH, SOME), 
+
+TOP, TOP, 2, 1, 1, 0); 
+
+} 
+
+regular assumptions { 
+
+(putWork (TOP) > execute 0 } • > destroyO; 
+
+} 
+
+) 
+
+Figure 8. RW Assumptions 
+
+class with the generated environment using JavaPathFinder 
+produced the following counter-example: 
+
+start > incMCPALT^2 > pullAltKnob > fly~2 > incMCPVS > fly 
+
+which indicated a mode confusion anomaly that is possible 
+in the tutor. 
+
+It is interesting to note, that a previous effort to build an 
+environment for this application required approximately 6 
+months and yielded an environment model that was incon- 
+sistent with the actual environment implementation. From,, 
+relatively simple specifications, BEG generated an environ- 
+ment in less than 4 minutes that is. guaranteed to be con- 
+sistent with the implementation, modulo the fidelity of as- 
+sumption specifications. 
+
+5.2.1 Replicated Workers 
+
+( 
+
+Replicated Workers (RW) is a configurable frame- 
+work designed to support the parallelization of simulations. 
+
+In previous work [10], we applied largely manual tech- 
+niques to model check a collection of properties of an Ada 
+implementation of this framework. Subsequent to that work 
+the framework was rewritten in Java and has been widely 
+used [12], 
+
+Like most frameworks, replicated workers instances cre- 
+ate threads internally. Clients control the degree and asyn- 
+chrony of parallelism in the configuration by passing pa- 
+rameters to the constructor of the framework instance. The 
+
+
+replicated workers framework makes significant use of in- 
+terfaces to enable call-backs to the client supplied compu- 
+tations that are to be parallelized. An environment for the 
+replicated workers, must define and instantiate classes that 
+implement each of the interfaces given in the framework 
+and define appropriate configuration information. 
+
+We checked several properties from [10] and were able 
+to reproduce those results with one difference. * When 
+checked a framework instance under the environment de- 
+fined in Figure 8 for deadlock, we found an actual dead- 
+lock. The bug was in the Java implementation of a barrier 
+synchronization utility. Its discovery was surprising since 
+the framework has been used in implementing more than 
+ten non-trivia! parallel simulation applications and this bug 
+was never discovered. We replaced the barrier implemen- 
+tation with one from java . util . concurrent and the 
+deadlock was eliminated. 
+
+6 Related Work 
+
+Modular approaches to model checking have been stud- 
+ied for more than a decade. This work has been carried 
+out mostly at the theoretical level although there have been 
+some implementations of game-theoretic approaches to rea- 
+soning about open systems (e.g., [1]). Our focus is on 
+capturing the complexities of unit/environment interaction 
+that arise in real programming language and supporting the 
+specification and extraction of precise, yet compact envi- 
+ronment models. 
+
+Environment generation from specifications presented in 
+this paper builds on work of Avrunin et al. [2], who devel- 
+oped tool support for analyzing partially implemented real- 
+time systems with some components implemented in Ada 
+and others described using graphical interval logic and reg- 
+ular expressions, and our previous work on model checking 
+of partial software systems in Ada [10, 11, 22]. In addition 
+to treating Java programs, we support a much richer class of 
+environment specifications and extract environment models 
+from existing code. 
+
+Another modular approach to checking multithreaded 
+programs is implemented in Calvin [13]. Their approach is 
+aimed at procedure checking relying on a user specifications 
+of environment assumptions that describe other procedures 
+in the system and constrain interactions among threads. Un- 
+like in our framework, theirs allows for simple invariant 
+specifications and requires that programs obey a restricted 
+class of locking disciplines in interacting. 
+
+As complementary to our approach, generation of envi- 
+ronment assumptions for optimistic environments has been 
+described in [14, 4] Their work is aimed at finding envi- 
+ronments within which the unit would satisfy its required 
+properties. This is an important direction to pursue for mod- 
+ular program checking, but we also believe that extraction 
+
+
+9 
+
+
+of environments plays an important role when using model 
+checking as a kind of unit testing approach on existing code 
+bases. 
+
+There is a number of examples of applying static analysis 
+techniques used in modular analysis or verification. Verisoft 
+incorporates a static analysis to closing of open systems by 
+calculating the influence of externally defined data [5]. Un- 
+like in our approach, they use a simple notion of data depen- 
+dence to drive their analysis and do not have the ability to 
+control the precision of the generated system. S toller [25] 
+describes an approach that computes a partition of a sys- 
+tem’s inputs based on the data-flow analysis of the system. 
+The idea is to use a single representative input value from 
+each partition to exercise all behaviors of the system and 
+to avoid exercising the same behavior twice. BEG gener- 
+ates environment values based on the user specification or 
+the assumption that the environment data is to be abstracted 
+before model checking phase. Rountev et al. [23] explore 
+how points-to and side-effects analyses may be used to pro- 
+duce summaries for library modules that later may be used 
+for separate analysis of client modules. Unlike in our work, 
+their summries are produced using whole program analysis 
+under the worst-case assumptions about a client and are tar- 
+geted at the optimizations of the client. Our analyses are 
+modular and explore the information about the unit, if there 
+are call backs from the environment. 
+
+7 Conclusions 
+
+Despite the significant computational complexity of 
+model checking, it has proven effective as an analysis tech- 
+nique that is capable of finding errors in real concurrent 
+Java programs (e.g., the Replicated Workers framework). 
+Modular approaches promise to further scale the application 
+of model checking to software. The Bandera Environment 
+Generator (BEG) provides automated tool support that has 
+proven effective in enabling useful forms of modular analy- 
+sis. 
+
+We are continuing development of the foundations for 
+BEG as well as the tool support. Specifically, we are work- 
+ing on analysis of program lock acquisition to safely ap- 
+proximate the synchronization interaction between the envi- 
+ronment and unit. In addition, we are adapting thread mod- 
+ular approaches [13] to enable model checking for arbitrary 
+numbers of environment threads. BEG is being released as 
+part of the Bandera toolset at http : //www . cis . ksu . 
+edu/bandera. 
+
+8 Acknowledgments 
+
+The authors would like to thank the members of the Bandera and JPF 
+projects for many helpful discussions and comments related to this work. 
+This work was supported in part by the U.S. Army Research Laboratory 
+
+
+and the U.S. Army Research Office under agreement DAAD 1901 10564, 
+
+by DARPA/EXO’s PCES program through AFRL Contract F33615-00-C- 
+
+3044, and by Intel Corporation under grant 11462. 
+
+References 
+
+[1] R. Alur, L. de Alfaro, R. Grosu, T. A. Henzinger, M. Kang, C. M. 
+Kirsch, R. Majumdar, F. Mang, and B.-Y. Wang, jmocha: A model- 
+checking tool that exploits design structure. In Proceedings of the 
+23rd Annual IEEE/ ACM International Conference on Software En- 
+gineering , pages pp. 835-836. IEEE Computer Society Press, 2001. 
+
+[2] G. S. Avrunin, J. C. Corbett, and L. Dillon. Analyzing partially- 
+implemented real-time systems. In Proceedings of the 19th Interna- 
+tional Conference on Software Engineering, pages 228-238, 1997. 
+
+[3] T. Ball, R. Majumdar, T. Millstein, and S. Rajamani. Automatic 
+predicate abstraction of C programs. In Proceedings of the ACM 
+SIGPLAN ’01 Conference on Programming Language Design and 
+Implementation (PLDI-01), volume 36.5 of ACM SIGPLAN Notices, 
+pages 203-213. ACMPress, June 20-22 2001. 
+
+[4] J. M. Cobleigh, D. Giannakopoulou, and C. S. Pas&reanu. Learning 
+assumptions for compositional verification. In Tools and Algorithms 
+for the Construction and Analysis of Systems, 9th International Con- 
+ference (LNCS 2619f Apr. 2003. 
+
+[5] C. Colby, P. Godefroid, and L. J. Jagadeesan, Automatically closing 
+open reactive programs. In SIGPLAN Conference on Programming 
+Language Design and Implementation , pages 345-357, 1998. 
+
+[6] J. C. Corbett. Constructing compact models of concurrent Java pro- 
+grams. In M. Young, editor, Proceedings of the 1998 International 
+Symposium on Software Testing and Analysis (ISSTA). ACM Press, 
+March 1998. 
+
+[7] J. C. Corbett, M. B. Dwyer, J. Hatcliff, S. Laubach, C. S. P&s&reanu, 
+Robby, and H. Zheng. Bandera : Extracting finite-state models from 
+Java source code. In Proceedings of the 22nd International Confer- 
+ence on Software Engineering, June 2000. 
+
+[8] J. C. Corbett, M. B. Dwyer, J. Hatcliff, and Robby. Expressing 
+checkable properties of dynamic systems: The bandera specification 
+language. International Journal on Software Tools for Technology 
+Transfer , 4(l):34-56, 2002. 
+
+[9] M. B. Dwyer, J. Hatcliff, R. Joehanes, S. Laubach, C. S. PSsareanu, 
+Robby, W. Visser, and H. Zheng. Tool- supported program abstraction 
+for finite-state verification. In Proceedings of the 23rd International 
+Conference on Software Engineering, May 2001. 
+
+[10] M. B. Dwyer and C. S. PSsSreanu. Filter-based model checking of 
+partial systems. In Proceedings of the Sixth ACM SIGSOFT Sympo- 
+sium on Foundations of Software Engineering , Nov. 1998. 
+
+[11] M. B. Dwyer and C. S. Pas&reanu. Model checking generic container 
+implementations. In Proceedings of the 1st Symposium on Generic 
+Programming , May 1998. 
+
+[12] M. B. Dwyer and V. Wallentine. A framework for parallel adap- 
+tive grid simulations. Concurrency - Practice and Experience , 
+9(1 1):1293-1310, 1997. 
+
+[13] C. Flanagan and S. Qadeer. Thread modular model checking. In 
+Model Checking Software (LNCS 2648), May 2003. 
+
+[14] D. Giannakopoulou, C. S. Pasareanu, and H. Barringer. Assumption 
+generation for software component verification. In Proceedings of 
+the 17th IEEE Conference on Automated Software Engineering , May 
+2002 . 
+
+[15] K. Havelund and T. Pressburger. Model checking Java programs us- 
+ing Java PathFinder. International Journal on Software Tools for 
+Technology Transfer , 1999. 
+
+
+10 
+
+
+
+[16] T. A. Henzinger, R. Jhala, R. Majumdar, and G. Sutre. Lazy abstrac- 
+tion. In Proceedings of the 29th ACM Symposium on Principles of 
+Programming Languages , pages 58-70, Jan. 2002. 
+
+[17] D. Lea. Concurrent Programming in Java[tm], Second Edition: De- 
+sign principles and Patterns . The Java Series. Addison -Wesley, 2nd 
+edition, 1999. 
+
+[18] R. Milner. Communication and Concurrecy. Prentice Hall, 1989. 
+
+[19] J. Penix, W. Visser, E. Engstrom, A. Larson, and N. Weininger. Veri- 
+fication of time partitioning in the deos scheduler kernel. In Proceed- 
+ings of the 22nd International Conference on Software Engineering , 
+June 2000. 
+
+[20] C. S. P&s&reanu. Deos kernel: Environment modeling using ltl 
+assumptions. Technical Report Technical Report NASA-ARC-IC- 
+2000-19 6, NASA Ames, 2000. 
+
+[21] C. S. P3sareanu. Abstraction and Modular Reasoning for the Verifi- 
+cation of Software. PhD thesis, Kansas State University, 2001. 
+
+[22] C. S. P3s2reanu, M. B. Dwyer, and M. Huth. Assume-guarantee 
+model checking of software : A comparative case study. In Theo- 
+retical and Applied Aspects of SPIN Model Checking (LNCS 16 80), 
+Sept. 1999. 
+
+[23] A. Rountev and B. G. Ryder. Points-to and side-effect analyses for 
+programs built with precompiled libraries. In Proceedings of the 10th 
+International Conference on Compiler Construction ( CC 7 01), 2001. 
+
+[24] L. Sherry, M. Feary, P. Poison, and E. Palmer. Autopilot tutor: Build- 
+ing and maintaining autopilot skills. 
+
+[25] S. D. S toller. Domain partitioning for open reactive systems. In 
+Proceedings of the international symposium on Software testing and 
+analysis, pages 44-54. ACM Press, 2002. 
+
+[26] O. Tkachuk. Adapting side effects analysis for modular program 
+model checking. Master’s thesis, Kansas State University, 2003. 
+
+[27] O. Tkachuk, G. Brat, and W. Visser. Using code level model checking 
+to discover automation surprises. In Proceedings of the 2002 Digital 
+Avionics Systems Conference , 2002. 
+
+[28] O. Tkachuk and M. B. Dwyer. Adapting side effects analysis for 
+modular program model checking. In Proceedings of the Fourth joint 
+meeting of the European Software Engineering Conference and ACM 
+SIGSOET Symposium on the Foundations of Software Engineering, 
+Sept. 2003. 
+
+[29] R. Valle-Rai, L. Hendren, V. Sundaresan, P. Lam, E. Gagnon, and 
+P Co. Soot - a Java optimization framework. In Proceedings of 
+CASCON'99, Nov. 1999. 
+
+[30] W. Visser, K. Havelund, G. Brat, , and S. Park. Model checking pro- 
+grams. In Proceedings of the 15th IEEE Conference on Automated 
+Software Engineering, Sept. 2000. 
+
+
+11 
+
+

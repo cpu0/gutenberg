@@ -1,0 +1,1201 @@
+IMs'O'i 
+
+
+Generalized Symbolic Execution 
+for Model Checking and Testing 
+
+
+Sarfraz Khurshid 1 , Corina Pasareanu 2 , and Willem Visser 2 
+
+1 MIT Laboratory for Computer Science, Cambridge, MA 02139 
+khurshidGIlcs . mit . edu 
+
+2 NASA Ames Research Center, Moffett Field, CA 94035 
+{p corina , wvisser}®email . arc . nasa. gov 
+
+Abstract. Modern software systems, which often are concurrent and 
+manipulate complex data structures must be extremely reliable. We 
+present a novel framework based on symbolic execution, for automated 
+checking of such systems. We provide a two- fold generalization of tradi- 
+tional symbolic execution based approaches: one, we define a program 
+instrumentation, which enables standard model checkers to perform sym- 
+bolic execution; two, we give a novel symbolic execution algorithm that 
+handles dynamically allocated structures (e.g., lists and trees), method 
+preconditions (e.g., acyclicity of lists), data (e.g., integers and strings) 
+and concurrency. The program instrumentation enables a model checker 
+to automatically explore program heap configurations (using a system- 
+atic treatment of aliasing) and manipulate logical formulae on program 
+data values (using a decision procedure). We illustrate two applications 
+of our framework: checking correctness of multi-threaded programs that 
+take inputs from unbounded domains with complex structure and gener- 
+ation of non-isomorphic test inputs that satisfy a testing criterion. Our 
+implementation for Java uses the Java PathFinder model checker. 
+
+
+1 Introduction 
+
+Modern software systems, which often are concurrent and manipulate complex 
+dynamically allocated data structures (e.g., linked lists or binary trees), must 
+be extremely reliable and correct. Two commonly used techniques for checking 
+correctness of such systems are testing and model checking. Testing is widely 
+used but usually involves manual test input generation. Furthermore, testing is 
+not good at finding errors related to concurrent behavior. Model checking, on 
+the other hand, is automatic and particularly good at analyzing (concurrent) 
+reactive systems. A drawback of model checking is that it suffers from the state- 
+space explosion problem and typically requires a closed system, i.e., a system 
+together with its environment, and a bound on input sizes [6,9,19]. 
+
+We present a novel framework based on symbolic execution [15], which au- 
+tomates test case generation, allows model checking concurrent programs that 
+take inputs from unbounded domains with complex structure, and helps com- 
+bat state-space explosion. Symbolic execution is a well known program analysis 
+technique, which represents values of program variables with symbolic values in- 
+stead of concrete (initialized) data and manipulates expressions involving sym- 
+bolic values. Symbolic execution traditionally arose in the context of checking 
+
+
+2 
+
+
+Khurshid et al. 
+
+
+sequential programs with a fixed number of integer variables. Several recent ap- 
+proaches [3,5,7] extend the traditional notion of symbolic execution to perform 
+various program analyses; these approaches, however, require dedicated tools to 
+perform the analyses and do not handle concurrent systems with complex inputs. 
+We provide a two-fold generalization of traditional symbolic execution. 
+
+One, we define a program instrumentation, which enables symbolic execu- 
+tion to be performed using a standard model checker (for the underlying lan- 
+guage) without having to build a dedicated tool. A source-to-source translation 
+instruments the original program and the resulting program can be symbolically 
+executed by any model checker that supports non-deterministic choice. In partic- 
+ular, the model checker checks the program by automatically exploring program 
+heap configurations (using a systematic treatment of aliasing) and manipulating 
+logical formulae on program data values (using a decision procedure). 
+
+Two, we give a novel symbolic execution algorithm that allows symbolic 
+execution of programs that use advanced constructs of modern programming 
+languages, such as Java and C-fi-fi. Our algorithm handles dynamically allocated 
+structures (e.g., lists and trees), method preconditions (e.g., acyclicity of lists), 
+data (e.g., integers and strings) and concurrency. To symbolically execute a 
+method, the algorithm uses lazy initialization , i.e., it initializes the components 
+of the method inputs on an “as-needed” basis, without requiring a priori bound 
+on input sizes. The algorithm supports the use of preconditions to initialize fields 
+only with valid values; this builds on our previous work [2] on using preconditions 
+to generate inputs for black box testing. 
+
+Our program instrumentation and symbolic execution algorithm enable check- 
+ing of concurrent programs that take inputs from unbounded domains with com- 
+plex structure using a standard model checker. To check a method’s correctness, 
+we use postconditions as test oracles (as in [2]); we also support partial correct- 
+ness properties given as assertions in the program and temporal specifications. 
+The main contributions of our work are: 
+
+— Providing a two- fold generalization of symbolic execution: one, to enable 
+a standard model checker to perform symbolic execution; two, to give an 
+algorithm for symbolic execution of programs in real languages (e.g., Java); 
+
+— Performing symbolic execution of code during explicit state model checking 
+
+• to address the state space explosion problem: we check the behavior of 
+code using symbolic values that represent data from very large domains 
+instead of enumerating and checking for a small set of concrete values; 
+
+• to achieve modularity: checking programs with uninitialized variables 
+allows checking of a compilation unit in isolation; 
+
+• to allow checking multithreaded programs against specifications that ex- 
+press strong correctness properties, e.g., the correctness of a distributed 
+algorithm for sorting linked lists with integers; 
+
+• to allow exploiting the model checker’s built-in capabilities, such as 
+different search strategies (e.g., heuristic search), checking of temporal 
+properties, and partial order and symmetry reductions; 
+
+— Automating non-isomorphic test input generation to satisfy a testing crite- 
+rion for programs with complex inputs and preconditions; 
+
+
+
+Generalized Symbolic Execution for Model Checking and Testing 
+
+
+3 
+
+
+class Node { 
+int elem; 
+
+Node next; 
+
+Node svapNodeO { 
+
+1: if (next ! =null) 
+
+2: if (elem-next .elem>0){ 
+
+3: Node t = next; 
+
+4: next = t.next; 
+
+5: t.next « this; 
+
+6: return t; 
+
+> 
+
+7 : return this ; 
+
+} 
+
+> 
+
+Fig. 1- Code to sort the first two nodes of a list (left) and an analysis of this code using 
+our symbolic execution based approach (right). 
+
+— A series of examples and a prototype implementation in Java, using the 
+Java PathFinder model checker, to illustrate the power of our approach; 
+our approach can easily be applied to other object-oriented and imperative 
+languages and model checkers. 
+
+Section 2 shows an example analysis in our framework. Section 3 describes 
+traditional symbolic execution. Section 4 gives our algorithm for generalized 
+symbolic execution. Section 5 describes our framework and Section 6 describes 
+our implementation and instrumentation. Section 7 illustrates two applications of 
+our implementation. We give related work in Section 8 and conclude in Section 9. 
+
+2 Example 
+
+This section presents an example to illustrate our approach. We check a method 
+that destructively updates its input structure. The Java code in Figure 1 declares 
+a class Node that implements singly-linked lists. The fields elem and next repre- 
+sent, respectively, the node’s integer value and a reference to the next node. The 
+method swapNode destructively updates its input list (referenced by the implicit 
+parameter this) to sort its first two nodes and returns the resulting list. 
+
+We analyze swapNode using our prototype implementation (Section 6) and 
+check that there are no unhandled runtime exceptions during any execution of 
+swapNode. The analysis automatically verifies that this property holds. 
+
+The analysis checks seven symbolic executions of swapNode (Figure 1). These 
+executions together represent all possible actual executions of swapNode. For 
+each symbolic execution, the analysis produces an input structure, a constraint 
+on the integer values in the input and the output structure. Thus for each row, 
+any actual input list that has the given structure and has integer values that 
+satisfy the given constraint, would result in the given output list. For an execu- 
+tion, the value “?” for an elem field indicates that the field is not accessed and 
+the “cloud” indicates that the next field is not accessed. 
+
+
+Input list + 
+
+□ 
+
+Constraint 
+
+none 
+
+=> 
+
+neiurneu nsi 
+
+0 
+
+
+none 
+
+=> 
+
+
+
+CEO <= El) 
+
+=> 
+
+^@—<£3 
+
+
+(E0> E!) 
+
+=> 
+
+
+
+(EO > El) 
+
+=> 
+
+
+
+(EO > El ) 
+
+=> 
+
+S15|b- 
+
+
+(EO > El) 
+
+=> 
+
+
+
+Khurshid et al. 
+
+
+int x, y; 
+if (x > y) { 
+
+: x: X, y: Y 
+: PC: X>Y 
+
+2 l. , 
+
+x: X-+Y, y: Y: 
+
+x = x + y; 
+
+: PC: X>Y 
+
+n 
+
+w 
+
+i 
+
+3 .L. 
+
+x = x - y; 
+if (x - y > 0) 
+assert (false) ; 
+
+> 
+
+: x: X+Y, y: X* 
+: PC: X>Y 
+
+4 i 
+
+: x: Y, y: X 
+
+.. : PC: X>Y 
+
+
+x: X, y: Y 
+PC: true 
+
+
+x: X, y: Y 
+PC: X<=Y 
+
+
+x: Y, y: X 
+
+PC: X>Y & Y-X>0: 
+FALSE! j 
+
+
+: x: Y, y: X 
+
+: PC: X>Y & Y-X<=G 
+
+
+Fig. 2. Code that swaps two integers and the corresponding symbolic execution tree, 
+where transitions are labeled with program control points. 
+
+
+Each input structure represents an isomorphism partition of the input space, 
+e.g., the last row in the table shows an input that represents all (cyclic or acyclic) 
+lists with at least three nodes such that the first element is greater than the 
+second element; the list returned has the first two elements swapped. 
+
+If we comment out the check for null on line (1) in swapNode, the analysis 
+reports that for the top most input in Figure 1, the method raises an unhandled 
+NullPointerException. All other input/output pairs stay the same. The anal- 
+ysis, therefore, refutes the method’s correctness by providing a counterexample. 
+
+The analysis supports method preconditions. For example, if we add to 
+swapNode a precondition that the input list should be acyclic, the analysis does 
+not consider the three executions (Figure 1), where the input has a cycle. The 
+input structures and constraints can be used for test input generation. 
+
+3 Background: Symbolic execution 
+
+The main idea behind symbolic execution [15] is to use symbolic values , instead 
+of actual data, as input values, and to represent the values of program variables 
+as symbolic expressions. As a result, the output values computed by a program 
+are expressed as a function of the input symbolic values. 
+
+The state of a symbolically executed program includes the (symbolic) values 
+of program variables, a path condition (PC) and a program counter. The path 
+condition is a (quantifier-free) boolean formula over the symbolic inputs; it ac- 
+cumulates constraints which the inputs must satisfy in order for an execution 
+to follow the particular assocciated path. The program counter defines the next 
+statement to be executed. A symbolic execution tree characterizing the execution 
+paths followed during the symbolic execution of a program. The nodes represent 
+program states and the arcs represent transitions between states. 
+
+Consider the code fragment in Figure 2, which swaps the values of integer 
+variables x and y, when x is greater than y. Figure 2 also shows the corresponding 
+
+
+Generalized Symbolic Execution for Model Checking and Testing 
+
+
+5 
+
+
+// initialization of field f on first access 
+if ( f is uninitialized ) { 
+
+if ( f is reference field of type T ) { 
+nondeterministically initialize f to 
+
+1. null 
+
+2. a new object of class T (with uninitialized field values) 
+
+3. an object created during a prior initialization of a field of type 
+if ( method_precondition is violated ) 
+
+backtrack () ; 
+
+} 
+
+if ( f is primitive (or string) field ) 
+
+initialize f to a new symbolic value of appropriate type 
+
+> 
+
+Fig. 3. Lazy initialization 
+
+symbolic execution tree. Initially, PC is true and x and y have symbolic values 
+X and Y, respectively. At each branch point, PC is updated with assumptions 
+about the inputs, in order to choose between alternative paths. For example, 
+after the execution of the first statement, both then and else alternatives of the 
+if statement are possible, and PC is updated accordingly. If the path condition 
+becomes false, i.e., there is no set of inputs that satisfy it, this means that the 
+symbolic state is not reachable, and symbolic execution does not continue for 
+that path. For example, statement (6) is unreachable. 
+
+4 Algorithm 
+
+This section describes our algorithm for generalizing traditional symbolic exe- 
+cution to support advanced constructs of modern programming languages, such 
+as Java and C++. We focus here on sequential programs. Section 5 presents the 
+treatment of multithreaded programs. 
+
+4.1 Lazy initialization 
+
+The heart of our framework is a novel algorithm for symbolically executing a 
+method that takes as inputs complex data structures with unbounded data. A 
+key feature of the algorithm is that it starts execution of the method on inputs 
+with uninitialized fields and uses lazy initialization to assign values to these 
+fields, i.e., it initializes fields when they are first accessed during the method’s 
+symbolic execution. This allows symbolic execution of methods without requiring 
+an apriori bound on the number of input objects. 
+
+We explain how the algorithm symbolically executes a method with one in- 
+put object, i.e., the implicit input this. Methods with multiple parameters are 
+treated similarly [2]. To execute a method m in class C, the algorithm first creates 
+a new object o of class C with uninitialized fields. Next, the algorithm invokes 
+o.m() and the execution proceeds following Java semantics for operations on 
+reference fields and following traditional symbolic execution for operations on 
+primitive fields, with the exception of the special treatment of accesses to unini- 
+tialized fields (Figure 3): 
+
+
+
+6 
+
+
+Khurshid et al. 
+
+
+- When the execution accesses an uninitialized reference field, the algorithm 
+nondeterministically initializes the field to the value null, to a reference to 
+new object with uninitialized fields, or to a reference of an object created 
+during a prior field initialization; this systematically treats aliasing. When 
+the execution accesses an uninitialized primitive (or string) field, the algo- 
+rithm first initializes the field to a new symbolic value of the appropriate type 
+and then the execution proceeds. Our algorithm supports the use of method 
+preconditions to ensure that fields are initialized to values permitted by the 
+precondition: when a reference field is initialized, the algorithm checks that 
+the precondition does not fail for the structure and the path condition that 
+currently constrain o; 
+
+- If the execution evaluates a branching condition on primitive fields, the al- 
+gorithm nondeterministically adds the condition or its negation to the corre- 
+sponding path condition and checks the path condition’s satisfiability using a 
+decision procedure. If the path condition becomes infeasible, the current ex- 
+ecution terminates (i.e., the algorithm backtracks). Otherwise the execution 
+proceeds. This systematically updates path conditions on primitive fields. 
+
+To check the method’s correctness, the algorithm uses the method’s post- 
+condition as a test oracle, whenever the symbolic execution (of a feasible path) 
+terminates without backtracking. 
+
+Input generation To generate inputs that meet a given testing criteria, the 
+algorithm symbolically executes the paths specified by the criteria. When the 
+algorithm completes symbolic execution of a path it generates an input structure 
+and a path condition on the primitive values in the structure, which together 
+define a set of inputs that execute the path. The algorithm generates such inputs 
+even for programs that perform destructive updates: it builds mappings between 
+objects with uninitialized fields and objects that are created when those fields 
+are initialized; it uses these mappings to construct input structures. 
+
+Isomorph breaking and structure generation A nice consequence of 
+lazy initialization of input fields is that for sequential programs, the algorithm 
+only executes program paths on nonisomorphic 3 inputs. In particular, the algo- 
+rithm can be used for systematic generation of inputs that have complex struc- 
+tural constraints by symbolically executing a predicate that checks the structural 
+constraints, as in [2]. 
+
+4.2 Illustration 
+
+We illustrate the algorithm using our running example from Figure 1. The sym- 
+bolic execution tree in Figure 4 illustrates some of the paths that the algorithm 
+explores while symbolically executing swapNode. Each node of the execution tree 
+denotes a state, which consists of the state of the heap (including the symbolic 
+values of the elem fields) and the path condition accumulated along the branch 
+(path) in the tree. A transition of the execution tree connects two tree nodes 
+and corresponds to either execution of a statement of swapNode or to a lazy ini- 
+tialization step; branching in the tree corresponds to a nondeterministic choice 
+that is introduced to handle aliasing or build a path condition. 
+
+
+3 This definition of isomorphism views structures as edge(node)-labeled graphs. 
+
+
+
+Generalized Symbolic Execution for Model Checking and Testing 
+
+
+7 
+
+
+next 
+
+EOfpSfEll 
+
+
+, . next 
+
+HHO 
+
+
+□ 
+
+; , .next. . next 
+
+: DMtMO 
+
+
+
+
+, next , , next 
+
+DM QMO 
+
+
+, .next , , next _ 
+
+
+, , next , next 
+
+m — 
+
+
+i Initialize "next" 
+/ in stmt 1 
+
+
+-.Initialize "elem" 
+} in stmt 2 
+
+
+* Initialize "next. elem" 
+} in stmt 2 
+
+
+K 
+
+
+PC: E0<=El f ... 
+
+
+. — .next — . next 
+PC: E0>E1, g 
+
+.next. , next _ 
+
+zzzzrzzzzfc 
+
+, , next , , next next : — , next — next 
+
+H — HI!MO : : 
+
+Z.Z.Z. .4.1... 
+
+next 
+
+:zzz:^z:z:.:.:: 
+
+
+lmtialize "t.next" 
+} in stmt 4 
+
+
+■ ZpeXt' 
+
+
+Fig. 4. Symbolic execution tree (excerpts). The nodes of the tree represent a state, 
+using notation described in Section 2. 
+
+
+The algorithm creates a new node object and invokes swapNode on the object. 
+Line (1) accesses the uninitialized next field and causes it to be initialized. 
+The algorithm explores three possibilities: either the field is null or the field 
+points to a new symbolic object or the field points to a previously created object 
+of the same type (with the only option being itself). Intuitively, this means 
+that, at this point in the execution, we make three different assumptions about 
+the configuration of the input list, according to different aliasing possibilities. 
+Another initialization happens during execution of statement (4), which results 
+in four possibilities, as there are two Node objects at that point in the execution. 
+
+When a condition involving primitive fields is symbolically executed (e.g., 
+statement (2)), the execution tree has a branch corresponding to the each pos- 
+sible outcome of the condition’s evaluation; evaluation of a condition involving 
+reference fields does not cause branching unless uninitialized fields are accessed. 
+
+If swapNode has the precondition that its input should be acyclic, the algo- 
+rithm does not explore the transitions marked with an “X” . 
+
+The input list corresponding to the output list pointed to by t in the bottom 
+most tree node is shown on the bottom row of Figure 1. 
+
+
+
+8 
+
+
+Khurshid et al. 
+
+
+
+counterexample(s)/test suite 
+
+[heap + path condition + thread scheduling] 
+
+
+Fig. 5. General methodology 
+
+
+5 Framework 
+
+This section describes our symbolic execution based framework for checking 
+correctness of software systems. Figure 5 illustrates our basic framework. To 
+enable a model checker to perform symbolic execution (following the algorithm 
+from Section 4), we instrument the original program by doing a source-to-source 
+translation that adds nondeterminism and support for manipulating formulae 
+that represent path conditions. The instrumentation allows any model checker 
+that supports backtracking to perform symbolic execution (essentially, the model 
+checker explores the symbolic execution tree of the program). Code instrumen- 
+tation uses a correctness specification to add precondition checking (which is 
+performed during field initialization) and postcondition checking (which is per- 
+formed when an execution completes) to the original program. Code instrumen- 
+tation can also generate a program that has the same behavior as the original 
+program for certain executions of interest, e.g., if the user is interested in limit- 
+ing loop unrolling to 0 or 1 [7], the instrumented program has all while loops 
+replaced by if statements. We describe some details of the instrumentation our 
+prototype implementation performs in Section 6. 
+
+The model checker checks the instrumented program using its usual state 
+space exploration technique(s). A state includes a heap configuration, a path 
+condition on primitive fields, and thread scheduling. Whenever a path condi- 
+tion is updated, the model checker checks the path condition for satisfiability 
+using an appropriate decision procedure, such as the Omega library [17] for lin- 
+ear integer constraints. If the path condition is unsatisfiable, the model checker 
+backtracks. The search of model checker can be guided by a heuristic provided 
+by the user [10]. 
+
+Correctness specifications can be given as preconditions and postconditions, 
+assertions or more general safety properties. Safety properties can be written in 
+the logical formalism recognized by the model checker or they can be specified 
+with code instrumentation, as in [1]. 
+
+
+
+
+
+Generalized Symbolic Execution for Model Checking and Testing 9 
+
+The framework can be used both for correctness checking and test input 
+generation. While checking correctness, the model checker reports counterex- 
+ample^) that violate a correctness criterion. While generating test inputs, the 
+model checker generates paths that are witnesses to a testing criteria encoded 
+in the specification, i.e., they are counterexamples to the negation of the specifi- 
+cation. Testing criteria can be encoded as correctness specifications as in [8,13]. 
+For every reported path, the model checker also reports the input heap config- 
+uration, the path condition for the primitive fields in the input, and a thread 
+scheduling, which can be used to reproduce the error. 
+
+Multi-threaded and non-deterministic systems Our framework allows 
+a standard model checker to perform symbolic execution. We use the model 
+checker also to systematically analyze thread interleavings and other forms of 
+nondeterminism that might be present in the code. Our framework also allows 
+exploiting the model checker’s built-in ability to combat state space explosion, 
+e.g., by using partial order and symmetry reductions, heuristic search. 
+
+Loops, recursion, method invocations We exploit the model checker s 
+search abilities to handle arbitrary program control flow. We do not require the 
+model checker to perform state matching, since state matching is, in general, 
+undecidable when states represent path conditions on unbounded data. Note 
+also that performing (forward) symbolic execution on programs with loops can 
+explore infinite execution trees. Therefore, for systematic state space exploration 
+we use depth first search with iterative deepening (Section 7.1) or breadth first 
+search (Section 7.2); our framework also supports heuristic based search [10]. 
+
+Our framework can be used for finding counterexamples to safety properties; 
+it can prove correctness for programs that have finite execution trees and have 
+decidable data constraints. 
+
+6 Implementation 
+
+We have implemented our approach in Java to check Java programs. For code 
+instrumentation, we build on the Korat tool [2] and modify Sun’s javac compiler. 
+For systematic state space exploration of instrumented programs, we build on the 
+the Java PathFinder (JPF) [19] model checker and as a decision procedure we use 
+a Java implementation of the Omega library [17] (that manipulates sets of linear 
+constraints over integer variables). This section outlines the instrumentation, 
+briefly describes JPF, and presents a critique of our approach. 
+
+6.1 Instrumentation 
+
+Conceptually, the instrumentation proceeds in two steps. First, the integer fields 
+and operations are instrumented: the declared type of integer fields of input ob- 
+jects is changed to Expression, which is a library class we provide to support 
+manipulation of symbolic integer expressions; a type analysis is used to deter- 
+mine which integer variables have their declared types changed to Expression ; 
+the operations involving these fields and variables are replaced with method 
+calls that implement “equivalent” operations that manipulate objects of type 
+Expression. Second, the field accesses are instrumented: field reads are replaced 
+
+
+4 We have not yet automated the type analysis 
+
+
+
+10 
+
+
+Khurshid et al. 
+
+
+class Node { 
+
+Expression elem; 
+
+Node next; 
+
+boolean _next_is_initialized ; 
+boolean _elem_is_initialized; 
+
+Node svapNodeQ { 
+
+1: if (_get_next () != null) 
+
+2: if (Expression. _pc ._update_GT( 
+
+_get_elem() . _minus( 
+
+_get_next () ._get_elem() ) , 
+new IntegerConstant (0) ) { 
+
+3: Node t = _get_next(); 
+
+4: _set_next (t . _get_next () ) ; 
+
+5: t . _set_next (this) ; 
+
+6: return t; 
+
+> 
+
+7: return this; } } 
+
+
+class Expression { ... 
+static PathCondition _pc; 
+Expression _minus (Expression e){ 
+...} > 
+
+class PathCondition { ... 
+
+Constraints c; 
+
+boolean _update_GT(Expression el. 
+Expression e2){ 
+boolean result = choose_boolean() ; 
+if (result) 
+
+c . add_constraint_GT (el , e2) ; 
+
+else 
+
+c . add_constraint_LE (el , e2) ; 
+if (! c . is_satisf iable () ) 
+backtrack () ; 
+return result; 
+
+> > 
+
+
+Fig. 6. Instrumented code (left) and library classes (right) 
+
+
+by get methods that return a value based on whether the field is symbolic or not 
+(get methods implement the lazy initialization, as described in Section 4); field 
+updates are replaced by set methods tvhich update the field’s value; the get 
+and set methods for a field also set a flag to indicate that the field is initialized. 
+
+As an illustration of the instrumentation, consider the code fragment from 
+Figure 1. Figure 6 gives part of the resulting code after instrumentation (left) 
+and the library classes (right) that we provide. The static field Expression. _pc 
+stores the (numeric) path condition. The method _update_GT makes a nondeter- 
+ministic choice (i.e., a call to choose_boolean) to add to the path condition the 
+constraint or the negation of the constraint its invocation expresses and returns 
+the corresponding boolean. Method is_satisf iable uses the Omega library 
+to check if the path condition is infeasible (in which case, JPF will backtrack). 
+The method aninus constructs a new Expression that represents the difference 
+between its input parameters. IntegerConstant is a subclass of Expression 
+and wraps concrete integer values. To keep track of uninitialized input fields we 
+add a boolean field in the class declaration for each reference field in the original 
+declaration, e.g., _jiext_is_initialized and _elem_is_initialized (which are 
+set to true by get (set) methods). 
+
+To store the input objects that are created as a result of a lazy initializa- 
+tion, we use a variable of class java, util .Vector, for each class that is in- 
+strumented. The get methods use the elements in this vector to systematically 
+initialize input reference fields. Our implementation also provides the library 
+class StringExpression to symbolically manipulate strings. 
+
+6.2 Java PathFinder 
+
+Our current prototype uses the Java PathFinder model checker (JPF), an explicit- 
+state model checker for Java programs that is built on top of a custom-made 
+
+
+Generalized Symbolic Execution for Model Checking and Testing 
+
+
+11 
+
+
+Java Virtual Machine (JVM). Since it is built on a JVM, it can handle all of 
+the language features of Java, but in addition it also treats nondeterministic 
+choice expressed in annotations of the program being analyzed. These features 
+for adding nondeterminism are used to implement the updating of path condi- 
+tions and the initialization of fields. JPF supports program annotations to cause 
+the search to backtrack when a certain condition evaluates to true this is used 
+to stop the analysis of infeasible paths (when path conditions are found to be 
+unsatisfiable). Lastly, JPF supports various heuristics [10], including ones based 
+on increasing testing-related coverage (e.g., statement, branch and condition 
+coverage), that can be used to guide the model checker’s search. 
+
+6.3 Discussion 
+
+We use preconditions in initializing fields. In particular, a field is not initialized 
+to a value that violates the precondition. Notice that we evaluate a precondition 
+on a structure that still may have some uninitialized fields, therefore we require 
+the precondition to be conservative , i.e., return false only if the initialized 
+fields of the structure violate a constraint in the precondition. A conservative 
+precondition or simply undecidability of path conditions may lead our analysis 
+to explore infeasible program paths. 
+
+We have not provided here a treatment of arrays. Following [2], we could 
+systematically initialize array length when an array field is first accessed, and 
+then treat each array component as a field. We would like to extend our analysis 
+to treat array length as a symbolic integer. 
+
+Our algorithm handles subclassing: in step 3 in Figure 3 consider all objects 
+created during a prior initialization of a field of type T or of a type S, where S is 
+a subclass of T. 
+
+7 Applications 
+
+This section shows two applications of our framework: correctness checking of a 
+distributed algorithm and test input generation for flight software. 
+
+7.1 Checking multithreaded programs with inputs 
+
+We illustrate an application of our symbolic execution framework on an example 
+that (incorrectly) implements a distributed algorithm for sorting linked -lists 
+with integers (in ascending order). To sort an input list, the algorithm spawns a 
+number of threads proportional to the number of nodes in the list. Each thread 
+is assigned two adjacent list nodes and allowed a maximum number of swaps it 
+can perform on elements in these nodes. This example illustrates our symbolic 
+execution technique in the context of concurrency, structured data (linked lists), 
+integer values as well as method pre-conditions and partial correctness criteria. 
+
+The Java code in Figure 7 declares a singly linked list and defines a method 
+for sorting lists. The method distributedSort takes an input list and spawns 
+several threads to sort the list. For each adjacent pair of nodes in the list, 
+distributedSort spawns a new thread that is responsible for swapping ele- 
+ments in these nodes. This method has a precondition that its input list should 
+be acyclic, as specified by the precondition clause. 
+
+
+12 
+
+
+Khurshid et ad. 
+
+
+class List { 
+
+Node header; 
+
+//C precondition: acyclic(); 
+void distributedSort () { 
+
+if (header =* null) return; 
+if (header. next == null) return; 
+int i = 0; 
+
+Node t = header; 
+
+while (t.next !* null) ■{ 
+
+new Swapper (t, ++i) . start () ; 
+t = t .next ; 
+
+> 
+
+
+class Swapper extends java. lang .Thread { 
+
+//can swap current . elem, current .next . elem 
+Node current; 
+int maxSwaps ; 
+
+Swapper (Node m, int n) { 
+current = m; maxSwaps = n; 
+
+> 
+
+public void run() { 
+int swapCount * 0; 
+for (int i = 0; i < maxSwaps; i++) 
+if (current . swapElemO ) swapCount++; 
+
+//C assert: if (swapCount == maxSwaps) 
+
+//C current . inOrder () ; 
+
+> 
+
+> 
+
+Fig. 7. A distributed sorting 
+
+
+class List { 
+
+boolean acyclic () { 
+
+Set visited = new HashSetO; 
+
+Node current = header; 
+while (current != null) { 
+if ( ! visited. add (current) ) 
+return false; 
+current = current .next ; 
+
+> 
+
+return true ; 
+
+> > 
+
+class Node { 
+int elem; 
+
+Node next; 
+
+synchronized boolean svapEleo(){ 
+synchronized (next) •{ 
+if (elem > next. elem) { 
+
+// actual swap 
+int t - elem; 
+elem * next. elem; 
+next. elem = t; 
+return true; 
+
+> > 
+
+return false; // do nothing 
+
+> 
+
+synchronized boolean inOrder {){ 
+synchronized (next) { 
+
+if (elem > next. elem) return false; 
+return true; 
+
+metliod for singly linked lists. 
+
+
+The swapElem method returns true or false based on whether the invoca- 
+tion actually swapped out of order elements or whether it was simply a no-op 
+(note that swapElem is different from swapNode in Figure 1, that performs de- 
+structive updating of the input list). We use synchronization to ensure that each 
+list element is only accessed by one thread at a time. The assert clause declares 
+a partial correctness property, which states that if a thread performs the allowed 
+maximum number of actual swaps, then the element in node current is in order. 
+
+We use our implementation to symbolically execute distributedSort on 
+acyclic lists and analyze the method’s correctness. The analysis invalidates the 
+stated correctness property and produces the following counterexample: 
+
+input list: [X] -> [Y] -> [Z] such that X > Y > Z 
+Thread- 1: swaps X and Y 
+Thread-2: swaps X and Z 
+
+resulting list: [Y] -> [Z] -> [X] ; Y and Z out of order 
+
+The input list consists of three symbolic integers X, Y, and Z such that X > Y > 
+Z. Thread- 1 is allowed one swap and Thread-2 is allowed two swaps. Thread- 1 
+performs its swap before Thread-2 performs any swap. Now Thread-2 performs 
+a swap. The resulting list after these two swaps is [Y] -> [Z] -> [X] with Y 
+> Z. Since Thread- 1 is not allowed any more swaps, it is not possible to bring 
+Y and Z in order. Thus, the input list together with this thread scheduling give 
+a counterexample to the specified correctness property. Note that to analyze 
+
+
+
+Generalized Symbolic Execution for Model Checking and Testing 
+
+
+13 
+
+
+distr ibutedSort we did not a priori bound the size of the list (and therefore 
+the number of threads to spawn). 
+
+7.2 Test input generation 
+
+We applied our framework to derive test inputs for code coverage, specifically 
+condition coverage, of an Altitude Switch used in flight control software (1800 
+lines of Java code) [11]. The switch receives as input a sequence of time-stamped 
+messages indicating the current altitude of an aircraft as well as an indication of 
+whether this reading is considered accurate or not (represented by the strings). 
+The input sequence was stored in a linked list of messages of undefined length, 
+and the program was instrumented to print out the input sequence as well as the 
+integer and string constraints, whenever a new condition, i.e. one that was not 
+covered before, was executed. The example therefore is a program that has as 
+input a complex data structure (i.e., the message list), and it manipulates both 
+integer and string constraints. 
+
+We used breadth-first search during model checking and the tool discovered 
+test inputs to cover all the conditions within 22 minutes of running time (on a 2.2 
+GHz Pentium with 2GB of memory). In contrast, we also used traditional model 
+checking with JPF, where we fixed the input sequence to have 3 messages and 
+the range of altitude values to be picked nondeterministically from 0 to 20000 
+feet — the model checking did not finish, and as a consequence did not generate 
+test inputs, for about a third of the conditions before memory was exhausted. 
+
+8 Related work 
+
+King [15] developed EFFIGY, a system for symbolic execution of programs with 
+a fixed number of integer variables. EFFIGY supported various kinds of program 
+analyses including test case generation and seems to be one of the earliest systems 
+of its kind. 
+
+PREfix is a bug-finding tool [3] based essentially on symbolic execution. 
+PREfix has been used very successfully on large scale commercial applications. 
+PREfix analyzes programs written in C/CH — b and aims to detect defects in dy- 
+namic memory management. It does not check rich properties, such as invariants 
+on data structures. PREfix may miss errors and it may report false alarms. 
+
+In previous work we developed Korat [2], a novel constraint solver for impera- 
+tive predicates to generate inputs from preconditions for black-box testing using 
+a given bound on input sizes. The work we present here additionally provides 
+test input generation for white-box testing, supports symbolic manipulation of 
+data values using a decision procedure, does not require bounds on input sizes, 
+supports checking of multi-threaded programs and extends instrumentation to 
+enable any model checker to perform symbolic execution. 
+
+Several projects aim at developing static analyses for verifying program prop- 
+erties. The Extended Static Checker (ESC) [7] uses a theorem prover to verify 
+partial correctness of classes annotated with JML specifications. ESC has been 
+used to verify absence of such errors as null pointer dereferences, array bounds 
+violations, and division by zero. However, tools like ESC cannot verify properties 
+of complex linked data structures. 
+
+
+
+14 
+
+
+Khurshid et al. 
+
+
+There are some recent research projects that attempt to address this issue. 
+The Three- Valued-Logic Analyzer (TVLA) [18] is the first static analysis sys- 
+tem to verify that the list structure is preserved in programs that perform list 
+reversals via destructive updating of the input list. TVLA has been used to an- 
+alyze programs that manipulate doubly linked lists and circular lists, as well 
+as some sorting programs. The pointer assertion logic engine (PALE) [16] can 
+verify a large class of data structures that can be represented by a spanning tree 
+backbone, with possibly additional pointers that do not add extra information. 
+These data structures include doubly linked lists, trees with parent pointers, 
+and threaded trees. Both systems require considerable manual effort: TVLA re- 
+quires instrumentation predicates, and PALE requires detailed loop invariants. 
+Shape analyses, such as TVLA and PALE, typically do not verify properties of 
+programs that perform operations on data values. 
+
+The Alloy constraint analyzer has been used in [14] for analyzing bounded 
+initial segments of computation sequences manipulating linked lists by translat- 
+ing them into first order logic. This approach requires a bound on the input sizes 
+and does not treat primitive data symbolically. 
+
+There has been a lot of recent interest in applying model checking to software. 
+Java PathFinder [19] and VeriSoft [9] operate directly on a Java, respectively C 
+program. Other projects, such as Bandera [6], translate Java programs into the 
+input language of SPIN [12] and NuSMV [4], They are whole program analysis 
+(i.e., cannot analyze a procedure in isolation). Our source-to-source translation 
+enables these tools to perform symbolic execution, and hence enables them to 
+analyze systems with complex inputs and to analyze procedures in isolation. 
+
+The SLAM tool [1] focuses on checking sequential C code with static data, 
+using well-engineered predicate abstraction and abstraction refinement tools. It 
+does not handle dynamically allocated data structures. 
+
+The Composite Symbolic Library [20] uses symbolic forward fixpoint oper- 
+ations to compute the reachable states of a program. It uses widening to help 
+termination but can analyze programs that manipulate lists with only a fixed 
+number of integer fields and is a whole-program analysis. 
+
+9 Conclusion 
+
+We presented a novel framework based on symbolic execution, for automated 
+checking of concurrent software systems that manipulate complex data struc- 
+tures. We provided a two-fold generalization of traditional symbolic execution 
+based approaches: one, we defined a program instrumentation, which enables 
+standard model checkers to perform symbolic execution; two, we gave a novel 
+symbolic execution algorithm that handles dynamically allocated structures, 
+method preconditions, data and concurrency. We illustrated two applications 
+of our framework: checking correctness of multi-threaded programs that take 
+inputs from unbounded domains with complex structure and generation of non- 
+isomorphic test inputs that satisfy a testing criteria. 
+
+We plan to evaluate the applicability of widening and other techniques that 
+aid termination, in checking rich correctness properties of programs that manip- 
+ulate complex structures. 
+
+
+
+Generalized Symbolic Execution for Model Checking and Testing 15 
+
+We believe performing symbolic execution during model checking is a pow- 
+erful technique; how well it scales to real applications remains to be seen. 
+
+
+References 
+
+1. T. Ball, R. Majumdax, T. Millstein, and S. Rajamani. Automatic predicate ab- 
+straction of C programs. In Proceedings of the 2001 ACM SIGPLAN Conference 
+on Programming Language Design and Implementation (PLDI 2001), volume 36.5 
+of ACM SIGPLAN Notices, pages 203-213. ACM Press, June 2001. 
+
+2. C. Boyapati, S. Khurshid, and D. Marinov. Korat: Automated testing based on 
+Java predicates. In Proceedings of the International Symposium on Software Testing 
+and Analysis (ISSTA), July 2002. 
+
+3. W. R. Bush, J. D. Pincus, and D. J. Sielaff. A static analyzer for finding dynamic 
+programming errors. Software: Practice and Experience, 30( /):775— 802, 2000. 
+
+4. A. Cimatti, E. M. Clarke, F. Giunchiglia, and M. Roveri. NuSMV: A new symbolic 
+model checker. International Journal on Software Tools for Technology Transfer, 
+2(4):410~425, 2000. 
+
+5. A. Coen-Porisini, G. Denaro, C. Ghezzi, and M. Pezze. Using symbolic execution 
+for verifying safety-critical systems. In Proceedings of the 8th European software 
+engineering conference held jointly with 9th ACM SIGSOFT international sympo- 
+sium on Foundations of software engineering, pages 142-151. ACM Press, 2001. 
+
+6. J. Corbett, M. Dwyer, J. Hatcliff, S. Laubach, C. Pasareanu, Robby, and H. Zheng. 
+Bandera : Extracting finite-state models from Java source code. In C. Ghezzi, 
+M. Jazayeri, and A. Wolf, editors, Proceedings of the 22nd International Conference 
+on Software Engineering (ICSE 2000), pages 439-448. ACM, 2000. 
+
+7. D. L. Detlefs, K. R. M. Leino, G. Nelson, and J. B. Saxe. Extended static checking. 
+Research Report 159, Compaq Systems Research Center, 1998. 
+
+8. A. Gargantini and C. Heitmeyer. Using model checking to generate tests from 
+requirements specifications. In Proceedings of the 7th European engineering con- 
+ference held jointly with the 7th ACM SIGSOFT international symposium on Foun- 
+dations of software engineering, pages 146-162. Springer- Verlag, 1999. 
+
+9. P. Godefroid. Model checking for programming languages using VenSoft. In Pro- 
+ceedings of the 24th Annual ACM Symposium on the Principles of Programming 
+Languages (POPL), pages 174—186, Paris, France, Jan. 1 99 1 . 
+
+10. A. Groce and W. Visser. Model checking java programs using structural heuris- 
+tics. In Proceedings of the 2002 International Symposium on Software Testing and 
+Analysis (ISSTA). ACM Press, july 2002. 
+
+11. M. P. E. Heimdahl, Y. Choi, and M. Whalen. Deviation analysis through model 
+checking. In Proceedings of the 17th IEEE International Conference on Automated 
+Software Engineering (ASETS), 2002. 
+
+12. G. Holzmann. The model checker SPIN. IEEE Transactions on Software Engi- 
+neering, 23(5):279-294, May 1997. 
+
+13. H. Hong, I. Lee, O. Sokolsky, and H. Ural. A temporal logic based theory of test 
+coverage and generation. In Proceedings of the 8th International Conference on 
+Tools and Algorithms for Construction and Analysis of Systems (TACAS), Apr. 
+2002 . 
+
+14. D. Jackson and M. Vaziri. Finding bugs with a constraint solver. In Proceedings of 
+the International Symposium on Software Testing and Analysis (ISSTA), Portland, 
+OR, Aug. 2000. 
+
+
+
+16 
+
+
+Khurshid et al. 
+
+
+15. J. C. King. Symbolic execution and program testing. Commun. ACM , 19(7):385- 
+394, 1976. 
+
+16. A. Moeller and M. I. Schwartzbach. The pointer assertion logic engine. In Proc. 
+SIGPLAN Conference on Programming Languages Design and Implementation , 
+Snowbird, UT, June 2001. 
+
+17. W. Pugh. The Omega test: A fast and practical integer programming algorithm 
+for dependence analysis. Communications of the ACM , 31(8), Aug. 1992. 
+
+18. M. Sagiv, T. Reps, and R. Wilhelm. Solving shape-analysis problems in languages 
+with destructive updating. ACM Trans. Prog. Lang. Syst January 1998. 
+
+19. W. Visser, K. Havelund, G. Brat, and S. Park. Model checking programs In 
+Proceedings of the 15th IEEE International Conference on Automated Software 
+Engineering (A SE), Grenoble, France, 2000. 
+
+20. T. Yavuz-Kahveci and T. Bultan. Automated verification of concurrent linked 
+lists with counters. In G. P. M. Hermenegildo, editor, Proceedings of the 9th Inter- 
+national Static Analysis Symposium, volume 2477 of Lecture Notes in Computer 
+Science. Springer- Verlag, 2002. 
+
+
+
